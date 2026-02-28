@@ -88,12 +88,14 @@ TrustRAG/
 
 ## n8n 워크플로우 현황
 
-| 워크플로우 | ID | 상태 |
-|-----------|-----|------|
-| TrustRAG-Auth | *(생성 후 기입)* | 🔲 미생성 |
-| TrustRAG-Chat | *(생성 후 기입)* | 🔲 미생성 |
-| TrustRAG-Upload | *(생성 후 기입)* | 🔲 미생성 |
-| TrustRAG-Admin | *(생성 후 기입)* | 🔲 미생성 |
+| 워크플로우 | ID | 웹훅 경로 | 상태 |
+|-----------|-----|-----------|------|
+| TrustRAG_Auth | `rDRKlBnQpPNyAcHH` | `POST /trustrag/validate-key` | ✅ 생성완료 (비활성) |
+| TrustRAG_Chat | `Oo9ThEBXSg3QUv4L` | `POST /trustrag/chat` | ✅ 생성완료 (비활성) |
+| TrustRAG_Upload | `ZrdgEqchaCSoycyP` | `POST /trustrag/upload` | ✅ 생성완료 (비활성) |
+| TrustRAG_Admin | `9c5kGAC7xHGXgvtX` | `POST /trustrag/admin` | ✅ 생성완료 (비활성) |
+
+> ⚠️ **Supabase URL 교체 필요**: 모든 워크플로우의 `TRUSTRAG_SUPABASE_URL_HERE`, `TRUSTRAG_SERVICE_KEY_HERE` 플레이스홀더를 실제 값으로 교체 후 활성화
 
 ---
 
@@ -113,13 +115,13 @@ TrustRAG/
 
 | Phase | 내용 | 상태 |
 |-------|------|------|
-| Phase 0 | 프로젝트 초기 설정 (저장소, 문서) | 🔄 진행 중 |
-| Phase 1 | DB 스키마 생성 (Supabase) | 🔲 대기 |
-| Phase 2 | 인증/권한 n8n 워크플로우 | 🔲 대기 |
-| Phase 3 | RAG 채팅 워크플로우 (권한 필터링) | 🔲 대기 |
-| Phase 4 | 파일 업로드 워크플로우 | 🔲 대기 |
+| Phase 0 | 프로젝트 초기 설정 (저장소, 문서, DB 스키마 파일) | ✅ 완료 |
+| Phase 1 | n8n 워크플로우 생성 (Auth/Chat/Upload/Admin) | ✅ 완료 |
+| Phase 2 | Supabase 프로젝트 생성 + DB 스키마 실행 | 🔲 대기 (사용자 직접) |
+| Phase 3 | n8n 워크플로우 Supabase 연결 + 활성화 | 🔲 대기 |
+| Phase 4 | 엔드투엔드 테스트 (Auth → Chat → Upload → Admin) | 🔲 대기 |
 | Phase 5 | 프론트엔드 (office-ai.app/trust/) | 🔲 대기 |
-| Phase 6 | 감사 로그 + 보안 강화 | 🔲 대기 |
+| Phase 6 | 감사 로그 대시보드 + 보안 강화 | 🔲 대기 |
 
 ---
 

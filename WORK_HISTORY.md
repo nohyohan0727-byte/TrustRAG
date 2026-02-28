@@ -10,15 +10,51 @@
 
 | 항목 | 현재 상태 |
 |------|-----------|
-| **진행 Phase** | Phase 0 완료 → Phase 1 (DB) 대기 |
+| **진행 Phase** | Phase 0~1 완료 → Phase 2 (Supabase 연결) 대기 |
 | **Supabase** | 새 프로젝트 생성 필요 (사용자 직접) |
-| **n8n 워크플로우** | 미생성 |
+| **n8n 워크플로우** | 4개 생성 완료 (Auth/Chat/Upload/Admin) |
 | **프론트엔드** | 미생성 |
 | **마지막 작업일** | 2026-02-28 |
 
 ---
 
 ## 작업 이력
+
+---
+
+### [2026-02-28] Phase 1 — n8n 워크플로우 생성
+
+| 항목 | 내용 |
+|------|------|
+| **작업자** | nohyohan0727-byte + Claude (Sonnet 4.6) |
+| **상태** | ✅ 완료 |
+
+**생성된 워크플로우:**
+
+| 이름 | n8n ID | 웹훅 경로 | 설명 |
+|------|--------|-----------|------|
+| TrustRAG_Auth | `rDRKlBnQpPNyAcHH` | `POST /trustrag/validate-key` | API 키 검증, 권한 반환 |
+| TrustRAG_Chat | `Oo9ThEBXSg3QUv4L` | `POST /trustrag/chat` | RAG 검색 + AI 응답 |
+| TrustRAG_Upload | `ZrdgEqchaCSoycyP` | `POST /trustrag/upload` | 파일 업로드 + 벡터화 |
+| TrustRAG_Admin | `9c5kGAC7xHGXgvtX` | `POST /trustrag/admin` | 관리자 API (유저/카테고리/권한) |
+
+**Admin 워크플로우 지원 액션:**
+- `create_user` — 신규 유저 생성
+- `create_category` — 카테고리 생성 + 동적 벡터 테이블 생성
+- `grant_permission` — 카테고리 접근 권한 부여
+- `list_users` — 회사 유저 목록 조회
+- `get_audit_logs` — 감사 로그 조회
+
+**중요 사항:**
+- 모든 Supabase URL은 `TRUSTRAG_SUPABASE_URL_HERE` 플레이스홀더 사용
+- Supabase 프로젝트 생성 후 n8n 노드에서 실제 URL/KEY로 교체 필요
+- n8n 백업: `n8n/` 폴더에 4개 JSON 파일 저장됨
+
+**다음 단계:**
+1. 사용자가 Supabase 새 프로젝트 생성 (supabase.com)
+2. `TRUSTRAG_SUPABASE_URL_HERE` → 실제 URL, `TRUSTRAG_SERVICE_KEY_HERE` → 실제 Key 교체
+3. db/01~04 SQL 실행하여 스키마 구성
+4. n8n 워크플로우 활성화
 
 ---
 
