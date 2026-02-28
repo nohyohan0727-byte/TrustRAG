@@ -1,0 +1,134 @@
+# TrustRAG — 프로젝트 컨텍스트
+
+> **이 파일은 Claude Code / Cursor가 대화 시작 시 반드시 읽는 컨텍스트 파일입니다.**
+> 새 세션을 시작할 때 이 파일을 먼저 읽고 현재 상태를 파악하세요.
+
+---
+
+## 프로젝트 개요
+
+| 항목 | 내용 |
+|------|------|
+| **프로젝트명** | TrustRAG |
+| **목표** | 기업용 멀티테넌트 계층형 권한 관리 RAG 시스템 |
+| **참고 프로젝트** | office-ai RAG 1차 (성공적 완성, 구조 참고) |
+| **핵심 차별점** | 멀티테넌트 + 역할 기반 접근제어(RBAC) + 감사 로그(Audit Log) |
+
+---
+
+## 기술 스택
+
+| 레이어 | 기술 | 비고 |
+|--------|------|------|
+| **DB / 벡터** | Supabase PostgreSQL + pgvector | 새 프로젝트 (1차와 별도) |
+| **워크플로우** | n8n Cloud | 기존 인스턴스에 새 워크플로우 추가 |
+| **AI / 임베딩** | OpenAI (GPT-4.1 + text-embedding-ada-002) | 1차와 동일 |
+| **파일 저장** | Google Drive | 경로: TrustRAG/{company}/{category}/{file} |
+| **프론트엔드** | 정적 HTML + Netlify | office-ai.app/trust/ 서브 경로 |
+| **소스관리** | GitHub | 저장소: nohyohan0727-byte/TrustRAG |
+| **개발 도구** | Claude Code + Cursor (병행) | 단계별 히스토리 공유 |
+
+---
+
+## 역할 체계 (Role Hierarchy)
+
+```
+Super Admin
+  └── Company Admin (테넌트별 1명 이상)
+        └── Group Admin (카테고리별 관리자)
+              └── User (최종 사용자)
+```
+
+| 역할 | 권한 |
+|------|------|
+| `super_admin` | 전체 시스템 + 회사(Tenant) 생성/관리 |
+| `company_admin` | 자사 카테고리 생성 + 중간관리자/유저 권한 부여 |
+| `group_admin` | 부여받은 카테고리에 파일 업로드 + 하위 유저 관리 |
+| `user` | 허용된 카테고리 내 문서 검색·질문만 가능 |
+
+---
+
+## 저장소 구조
+
+```
+TrustRAG/
+├── TRUSTRAG.md          ← 이 파일 (컨텍스트)
+├── ROADMAP.md           ← 단계별 구현 계획
+├── WORK_HISTORY.md      ← 작업 이력 (Claude/Cursor 공용)
+├── .env.example         ← 환경변수 목록 (키값 없이)
+├── db/
+│   ├── 01_tables.sql    ← 테이블 스키마
+│   ├── 02_rls.sql       ← Row Level Security 정책
+│   ├── 03_functions.sql ← RPC 함수 (match_documents_*)
+│   └── 04_seed.sql      ← 초기 데이터 (super_admin 등)
+├── n8n/
+│   ├── 01_auth.json          ← 인증/권한 확인 워크플로우
+│   ├── 02_chat.json          ← RAG 채팅 워크플로우
+│   ├── 03_upload.json        ← 파일 업로드 워크플로우
+│   └── 04_admin.json         ← 관리자 API 워크플로우
+├── docs/
+│   ├── api-reference.md      ← Webhook API 명세
+│   └── schema-erd.md         ← DB ERD 설명
+└── work-logs/
+    └── YYYY-MM-DD-*.md       ← 날짜별 상세 작업 로그
+```
+
+---
+
+## Supabase 정보
+
+| 항목 | 값 |
+|------|-----|
+| **프로젝트 ID** | *(생성 후 기입)* |
+| **URL** | *(생성 후 기입)* |
+| **Anon Key** | `.env`에서 관리 |
+| **Service Key** | `.env`에서 관리 |
+
+---
+
+## n8n 워크플로우 현황
+
+| 워크플로우 | ID | 상태 |
+|-----------|-----|------|
+| TrustRAG-Auth | *(생성 후 기입)* | 🔲 미생성 |
+| TrustRAG-Chat | *(생성 후 기입)* | 🔲 미생성 |
+| TrustRAG-Upload | *(생성 후 기입)* | 🔲 미생성 |
+| TrustRAG-Admin | *(생성 후 기입)* | 🔲 미생성 |
+
+---
+
+## 핵심 설계 원칙
+
+1. **데이터 격리**: Supabase RLS로 company_id 기준 테넌트 격리 강제
+2. **권한 필터링**: 모든 RAG 검색에 `user_category_access` 기반 메타데이터 필터 적용
+3. **감사 추적**: 모든 검색·다운로드·업로드 → `audit_logs` 테이블 기록
+4. **임시 다운로드**: 파일 다운로드는 원본 URL 직접 노출 금지 → 유효시간 제한 토큰 방식
+5. **1차 프로젝트 패턴 재사용**: n8n 노드 구조, Supabase RPC 패턴, HTML 템플릿
+
+---
+
+## 현재 진행 단계
+
+> **업데이트 규칙**: 작업 완료 후 반드시 이 섹션을 갱신하세요.
+
+| Phase | 내용 | 상태 |
+|-------|------|------|
+| Phase 0 | 프로젝트 초기 설정 (저장소, 문서) | 🔄 진행 중 |
+| Phase 1 | DB 스키마 생성 (Supabase) | 🔲 대기 |
+| Phase 2 | 인증/권한 n8n 워크플로우 | 🔲 대기 |
+| Phase 3 | RAG 채팅 워크플로우 (권한 필터링) | 🔲 대기 |
+| Phase 4 | 파일 업로드 워크플로우 | 🔲 대기 |
+| Phase 5 | 프론트엔드 (office-ai.app/trust/) | 🔲 대기 |
+| Phase 6 | 감사 로그 + 보안 강화 | 🔲 대기 |
+
+---
+
+## 1차 프로젝트 참고 정보 (office-ai RAG)
+
+| 항목 | 값 |
+|------|-----|
+| n8n 채팅 워크플로우 | `DUhC36eo7SJNw2Wc` |
+| n8n 업로드 워크플로우 | `BnNM5zFuBsqrSyeM` |
+| Supabase 프로젝트 | `mkmxhmoocqnkltjxdfbm` (TrustRAG와 별도) |
+| 프론트엔드 | https://office-ai.app/demo.html |
+| 히스토리 | `C:/dev/my-dev-workspace/WORK_HISTORY.md` |
