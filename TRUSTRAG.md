@@ -79,10 +79,13 @@ TrustRAG/
 
 | 항목 | 값 |
 |------|-----|
-| **프로젝트 ID** | *(생성 후 기입)* |
-| **URL** | *(생성 후 기입)* |
-| **Anon Key** | `.env`에서 관리 |
-| **Service Key** | `.env`에서 관리 |
+| **프로젝트 ID** | `ryzkcdvywxblsbyujtfv` |
+| **URL** | `https://ryzkcdvywxblsbyujtfv.supabase.co` |
+| **Region** | ap-southeast-1 (싱가포르) |
+| **Anon Key** | `.env`에서 관리 (TRUSTRAG_SUPABASE_ANON_KEY) |
+| **Service Key** | `.env`에서 관리 (TRUSTRAG_SUPABASE_SERVICE_KEY) |
+| **DB Password** | `.env`에서 관리 (TRUSTRAG_DB_PASSWORD) |
+| **n8n Supabase Cred ID** | `sqACFCNh6c9Vg6iY` |
 
 ---
 
@@ -90,12 +93,10 @@ TrustRAG/
 
 | 워크플로우 | ID | 웹훅 경로 | 상태 |
 |-----------|-----|-----------|------|
-| TrustRAG_Auth | `rDRKlBnQpPNyAcHH` | `POST /trustrag/validate-key` | ✅ 생성완료 (비활성) |
-| TrustRAG_Chat | `Oo9ThEBXSg3QUv4L` | `POST /trustrag/chat` | ✅ 생성완료 (비활성) |
-| TrustRAG_Upload | `ZrdgEqchaCSoycyP` | `POST /trustrag/upload` | ✅ 생성완료 (비활성) |
-| TrustRAG_Admin | `9c5kGAC7xHGXgvtX` | `POST /trustrag/admin` | ✅ 생성완료 (비활성) |
-
-> ⚠️ **Supabase URL 교체 필요**: 모든 워크플로우의 `TRUSTRAG_SUPABASE_URL_HERE`, `TRUSTRAG_SERVICE_KEY_HERE` 플레이스홀더를 실제 값으로 교체 후 활성화
+| TrustRAG_Auth | `rDRKlBnQpPNyAcHH` | `POST /trustrag/validate-key` | ✅ 활성화됨 |
+| TrustRAG_Chat | `Oo9ThEBXSg3QUv4L` | `POST /trustrag/chat` | ✅ 활성화됨 |
+| TrustRAG_Upload | `ZrdgEqchaCSoycyP` | `POST /trustrag/upload` | ✅ 활성화됨 |
+| TrustRAG_Admin | `9c5kGAC7xHGXgvtX` | `POST /trustrag/admin` | ✅ 활성화됨 |
 
 ---
 
@@ -117,8 +118,8 @@ TrustRAG/
 |-------|------|------|
 | Phase 0 | 프로젝트 초기 설정 (저장소, 문서, DB 스키마 파일) | ✅ 완료 |
 | Phase 1 | n8n 워크플로우 생성 (Auth/Chat/Upload/Admin) | ✅ 완료 |
-| Phase 2 | Supabase 프로젝트 생성 + DB 스키마 실행 | 🔲 대기 (사용자 직접) |
-| Phase 3 | n8n 워크플로우 Supabase 연결 + 활성화 | 🔲 대기 |
+| Phase 2 | Supabase 프로젝트 생성 + DB 스키마 실행 | ✅ 완료 |
+| Phase 3 | n8n 워크플로우 Supabase 연결 + 활성화 | ✅ 완료 |
 | Phase 4 | 엔드투엔드 테스트 (Auth → Chat → Upload → Admin) | 🔲 대기 |
 | Phase 5 | 프론트엔드 (office-ai.app/trust/) | 🔲 대기 |
 | Phase 6 | 감사 로그 대시보드 + 보안 강화 | 🔲 대기 |

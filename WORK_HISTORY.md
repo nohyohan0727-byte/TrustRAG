@@ -10,15 +10,45 @@
 
 | 항목 | 현재 상태 |
 |------|-----------|
-| **진행 Phase** | Phase 0~1 완료 → Phase 2 (Supabase 연결) 대기 |
-| **Supabase** | 새 프로젝트 생성 필요 (사용자 직접) |
-| **n8n 워크플로우** | 4개 생성 완료 (Auth/Chat/Upload/Admin) |
+| **진행 Phase** | Phase 0~3 완료 → Phase 4 (엔드투엔드 테스트) |
+| **Supabase** | `ryzkcdvywxblsbyujtfv` (활성) |
+| **n8n 워크플로우** | 4개 생성 + 활성화 완료 |
 | **프론트엔드** | 미생성 |
 | **마지막 작업일** | 2026-02-28 |
 
 ---
 
 ## 작업 이력
+
+---
+
+### [2026-02-28] Phase 2~3 — Supabase 연결 + 워크플로우 활성화
+
+| 항목 | 내용 |
+|------|------|
+| **작업자** | nohyohan0727-byte + Claude (Sonnet 4.6) |
+| **상태** | ✅ 완료 |
+
+**Supabase 프로젝트:**
+- Project ID: `ryzkcdvywxblsbyujtfv`
+- URL: `https://ryzkcdvywxblsbyujtfv.supabase.co`
+- Region: ap-southeast-1 (싱가포르)
+- DB Schema: 01_tables, 02_rls, 03_functions, 04_seed 모두 실행 완료
+
+**n8n 크레덴셜:**
+- TrustRAG Supabase 크레덴셜 생성 (ID: `sqACFCNh6c9Vg6iY`)
+- OpenAI 기존 크레덴셜 재사용 (ID: `3Ce5sE9uZ6LPb2sk`)
+- 4개 워크플로우 모두 활성화 완료
+
+**초기 Super Admin 계정:**
+- Email: admin@jknetworks.co.kr
+- API Key: `trust_super_CHANGE_THIS_KEY` (04_seed.sql — **반드시 변경 필요**)
+- Role: super_admin / Company: JK Networks
+
+**다음 단계:**
+1. super_admin API 키 변경 (Supabase SQL Editor)
+2. Admin API로 테스트 회사/유저/카테고리 생성
+3. 엔드투엔드 테스트 (Auth → Chat → Upload)
 
 ---
 
