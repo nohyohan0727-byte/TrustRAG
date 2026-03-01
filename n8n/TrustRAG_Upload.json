@@ -1,1 +1,1396 @@
-{"updatedAt":"2026-02-28T09:27:07.881Z","createdAt":"2026-02-28T09:27:07.881Z","id":"ZrdgEqchaCSoycyP","name":"TrustRAG_Upload","description":null,"active":false,"isArchived":false,"nodes":[{"id":"up-webhook","name":"Upload Webhook","type":"n8n-nodes-base.webhook","typeVersion":2,"position":[240,300],"parameters":{"httpMethod":"POST","path":"trustrag/upload","responseMode":"responseNode","options":{"allowedOrigins":"*"}}},{"id":"up-extract","name":"Extract Request","type":"n8n-nodes-base.code","typeVersion":2,"position":[460,300],"parameters":{"jsCode":"const body = $input.first().json.body || $input.first().json;\nreturn [{ json: { api_key: (body.api_key||'').trim(), category: body.category||'', filename: body.filename||'', filedata: body.filedata||'', filesize: body.filesize||0, mimetype: body.mimetype||'application/octet-stream' } }];"}},{"id":"up-validate","name":"Validate Auth","type":"n8n-nodes-base.httpRequest","typeVersion":4.2,"position":[680,300],"parameters":{"method":"POST","url":"TRUSTRAG_SUPABASE_URL_HERE/rest/v1/rpc/get_user_permissions","sendHeaders":true,"headerParameters":{"parameters":[{"name":"apikey","value":"TRUSTRAG_SERVICE_KEY_HERE"},{"name":"Authorization","value":"Bearer TRUSTRAG_SERVICE_KEY_HERE"},{"name":"Content-Type","value":"application/json"}]},"sendBody":true,"contentType":"json","bodyParameters":{"parameters":[{"name":"p_api_key","value":"={{ $('Extract Request').first().json.api_key }}"}]},"options":{}}},{"id":"up-is-auth","name":"Is Authorized?","type":"n8n-nodes-base.if","typeVersion":2,"position":[900,300],"parameters":{"conditions":{"options":{"caseSensitive":true},"conditions":[{"id":"c1","leftValue":"={{ $json.error }}","rightValue":"","operator":{"type":"string","operation":"empty","singleValue":true}}],"combinator":"and"}}},{"id":"up-check-perm","name":"Check Upload Permission","type":"n8n-nodes-base.code","typeVersion":2,"position":[1120,180],"parameters":{"jsCode":"const auth = $('Validate Auth').first().json;\nconst requested = $('Extract Request').first().json.category;\nconst cats = auth.categories || [];\nconst UPLOAD_ROLES = ['super_admin','company_admin','group_admin'];\nif (!UPLOAD_ROLES.includes(auth.role)) {\n  return [{ json: { ...auth, can_proceed: false, error: 'Upload requires group_admin role or higher' } }];\n}\nconst cat = cats.find(c => c.name === requested || (c.table_name||'').includes(requested));\nif (!cat) return [{ json: { ...auth, can_proceed: false, error: 'Category not found: '+requested } }];\nif (!cat.can_upload && auth.role !== 'super_admin' && auth.role !== 'company_admin') {\n  return [{ json: { ...auth, can_proceed: false, error: 'No upload permission for this category' } }];\n}\nreturn [{ json: { ...auth, selected_category: cat, can_proceed: true } }];"}},{"id":"up-perm-ok","name":"Can Upload?","type":"n8n-nodes-base.if","typeVersion":2,"position":[1340,180],"parameters":{"conditions":{"options":{"caseSensitive":true},"conditions":[{"id":"c2","leftValue":"={{ $json.can_proceed }}","rightValue":true,"operator":{"type":"boolean","operation":"equal"}}],"combinator":"and"}}},{"id":"up-to-binary","name":"Base64 to Binary","type":"n8n-nodes-base.code","typeVersion":2,"position":[1560,120],"parameters":{"jsCode":"const req = $('Extract Request').first().json;\nconst binary = Buffer.from(req.filedata, 'base64');\nreturn [{ json: { filename: req.filename, mimetype: req.mimetype, filesize: req.filesize }, binary: { data: { data: binary.toString('base64'), mimeType: req.mimetype, fileName: req.filename } } }];"}},{"id":"up-drive","name":"Upload to Google Drive","type":"n8n-nodes-base.httpRequest","typeVersion":4.2,"position":[1780,120],"parameters":{"method":"POST","url":"=https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart","authentication":"predefinedCredentialType","nodeCredentialType":"googleApi","sendHeaders":true,"headerParameters":{"parameters":[]},"sendBody":true,"contentType":"multipart-form-data","bodyParameters":{"parameters":[{"name":"metadata","value":"={ \"name\": \"{{ $('Extract Request').first().json.filename }}\", \"parents\": [\"TRUSTRAG_DRIVE_FOLDER_ID_HERE\"] }"},{"name":"file","value":"={{ $binary.data }}"}]},"options":{}}},{"id":"up-vector","name":"Supabase Vector Store","type":"@n8n/n8n-nodes-langchain.vectorStoreSupabase","typeVersion":1,"position":[2000,120],"parameters":{"mode":"insert","tableName":"={{ $('Check Upload Permission').first().json.selected_category.table_name }}","queryName":"=match_documents_{{ $('Check Upload Permission').first().json.selected_category.table_name }}","options":{"metadata":{"metadataValues":[{"name":"company_id","value":"={{ $('Check Upload Permission').first().json.company_id }}"},{"name":"category_id","value":"={{ $('Check Upload Permission').first().json.selected_category.category_id }}"},{"name":"source_filename","value":"={{ $('Extract Request').first().json.filename }}"},{"name":"source_file_id","value":"={{ $('Upload to Google Drive').first().json.id }}"},{"name":"source_drive_url","value":"=https://drive.google.com/uc?export=download&id={{ $('Upload to Google Drive').first().json.id }}"}]}}}},{"id":"up-embed2","name":"Upload Embeddings","type":"@n8n/n8n-nodes-langchain.embeddingsOpenAi","typeVersion":1.2,"position":[1920,320],"parameters":{"model":"text-embedding-ada-002","options":{}}},{"id":"up-save-meta","name":"Save File Metadata","type":"n8n-nodes-base.httpRequest","typeVersion":4.2,"position":[2220,120],"parameters":{"method":"POST","url":"TRUSTRAG_SUPABASE_URL_HERE/rest/v1/files","sendHeaders":true,"headerParameters":{"parameters":[{"name":"apikey","value":"TRUSTRAG_SERVICE_KEY_HERE"},{"name":"Authorization","value":"Bearer TRUSTRAG_SERVICE_KEY_HERE"},{"name":"Content-Type","value":"application/json"},{"name":"Prefer","value":"return=representation"}]},"sendBody":true,"contentType":"json","bodyParameters":{"parameters":[{"name":"company_id","value":"={{ $('Check Upload Permission').first().json.company_id }}"},{"name":"category_id","value":"={{ $('Check Upload Permission').first().json.selected_category.category_id }}"},{"name":"file_name","value":"={{ $('Extract Request').first().json.filename }}"},{"name":"file_path","value":"=TrustRAG/{{ $('Check Upload Permission').first().json.company_id }}/{{ $('Extract Request').first().json.filename }}"},{"name":"drive_file_id","value":"={{ $('Upload to Google Drive').first().json.id }}"},{"name":"drive_url","value":"=https://drive.google.com/uc?export=download&id={{ $('Upload to Google Drive').first().json.id }}"},{"name":"file_size","value":"={{ $('Extract Request').first().json.filesize }}"},{"name":"mime_type","value":"={{ $('Extract Request').first().json.mimetype }}"},{"name":"upload_user_id","value":"={{ $('Check Upload Permission').first().json.user_id }}"}]},"options":{}}},{"id":"up-audit","name":"Write Audit Log","type":"n8n-nodes-base.httpRequest","typeVersion":4.2,"position":[2440,120],"parameters":{"method":"POST","url":"TRUSTRAG_SUPABASE_URL_HERE/rest/v1/rpc/write_audit_log","sendHeaders":true,"headerParameters":{"parameters":[{"name":"apikey","value":"TRUSTRAG_SERVICE_KEY_HERE"},{"name":"Authorization","value":"Bearer TRUSTRAG_SERVICE_KEY_HERE"},{"name":"Content-Type","value":"application/json"}]},"sendBody":true,"contentType":"json","bodyParameters":{"parameters":[{"name":"p_user_id","value":"={{ $('Check Upload Permission').first().json.user_id }}"},{"name":"p_company_id","value":"={{ $('Check Upload Permission').first().json.company_id }}"},{"name":"p_action","value":"upload"},{"name":"p_category_id","value":"={{ $('Check Upload Permission').first().json.selected_category.category_id }}"},{"name":"p_file_id","value":"={{ $('Save File Metadata').first().json.id }}"},{"name":"p_query_text","value":"={{ $('Extract Request').first().json.filename }}"}]},"options":{"response":{"response":{"neverError":true}}}}},{"id":"up-return","name":"Return Response","type":"n8n-nodes-base.respondToWebhook","typeVersion":1.1,"position":[2660,120],"parameters":{"respondWith":"text","responseBody":"={{ JSON.stringify({ success: true, message: '업로드 완료', filename: $('Extract Request').first().json.filename, drive_file_id: $('Upload to Google Drive').first().json.id, category: $('Check Upload Permission').first().json.selected_category.name }) }}","options":{"responseHeaders":{"entries":[{"name":"Content-Type","value":"application/json"},{"name":"Access-Control-Allow-Origin","value":"*"}]}}}},{"id":"up-auth-err","name":"Return Auth Error","type":"n8n-nodes-base.respondToWebhook","typeVersion":1.1,"position":[1120,440],"parameters":{"respondWith":"text","responseCode":401,"responseBody":"={{ JSON.stringify({ success: false, message: $('Validate Auth').first().json.error || 'Unauthorized' }) }}","options":{"responseHeaders":{"entries":[{"name":"Content-Type","value":"application/json"}]}}}},{"id":"up-perm-err","name":"Return Permission Error","type":"n8n-nodes-base.respondToWebhook","typeVersion":1.1,"position":[1560,300],"parameters":{"respondWith":"text","responseCode":403,"responseBody":"={{ JSON.stringify({ success: false, message: $('Check Upload Permission').first().json.error || 'Permission denied' }) }}","options":{"responseHeaders":{"entries":[{"name":"Content-Type","value":"application/json"}]}}}}],"connections":{"Upload Webhook":{"main":[[{"node":"Extract Request","type":"main","index":0}]]},"Extract Request":{"main":[[{"node":"Validate Auth","type":"main","index":0}]]},"Validate Auth":{"main":[[{"node":"Is Authorized?","type":"main","index":0}]]},"Is Authorized?":{"main":[[{"node":"Check Upload Permission","type":"main","index":0}],[{"node":"Return Auth Error","type":"main","index":0}]]},"Check Upload Permission":{"main":[[{"node":"Can Upload?","type":"main","index":0}]]},"Can Upload?":{"main":[[{"node":"Base64 to Binary","type":"main","index":0}],[{"node":"Return Permission Error","type":"main","index":0}]]},"Base64 to Binary":{"main":[[{"node":"Upload to Google Drive","type":"main","index":0}]]},"Upload to Google Drive":{"main":[[{"node":"Supabase Vector Store","type":"main","index":0}]]},"Supabase Vector Store":{"main":[[{"node":"Save File Metadata","type":"main","index":0}]]},"Save File Metadata":{"main":[[{"node":"Write Audit Log","type":"main","index":0}]]},"Write Audit Log":{"main":[[{"node":"Return Response","type":"main","index":0}]]},"Upload Embeddings":{"ai_embedding":[[{"node":"Supabase Vector Store","type":"ai_embedding","index":0}]]}},"settings":{"executionOrder":"v1","callerPolicy":"workflowsFromSameOwner","availableInMCP":false},"staticData":null,"meta":null,"pinData":null,"versionId":"cd2accf9-a47a-43d4-b611-073c01bc6995","activeVersionId":null,"versionCounter":1,"triggerCount":0,"shared":[{"updatedAt":"2026-02-28T09:27:07.883Z","createdAt":"2026-02-28T09:27:07.883Z","role":"workflow:owner","workflowId":"ZrdgEqchaCSoycyP","projectId":"gYkSZvHl0guLtWX6","project":{"updatedAt":"2026-01-14T06:41:15.180Z","createdAt":"2026-01-14T06:41:10.535Z","id":"gYkSZvHl0guLtWX6","name":"nohjinkwang   <thomasnoh@kakao.com>","type":"personal","icon":null,"description":null,"creatorId":"e1385cb4-ffed-49bb-b7eb-befd0ffea08e"}}],"tags":[],"activeVersion":null}
+{
+  "updatedAt": "2026-03-01T01:16:03.056Z",
+  "createdAt": "2026-02-28T09:27:07.881Z",
+  "id": "ZrdgEqchaCSoycyP",
+  "name": "TrustRAG_Upload",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "trustrag/upload",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "up-webhook",
+      "name": "Upload Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        304
+      ],
+      "webhookId": "tr-upload"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || $input.first().json;\nreturn [{ json: { api_key: (body.api_key||'').trim(), category: body.category||'', filename: body.filename||'', filedata: body.filedata||'', filesize: body.filesize||0, mimetype: body.mimetype||'application/octet-stream' } }];"
+      },
+      "id": "up-extract",
+      "name": "Extract Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        464,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ryzkcdvywxblsbyujtfv.supabase.co/rest/v1/rpc/get_user_permissions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "p_api_key",
+              "value": "={{ $('Extract Request').first().json.api_key }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "up-validate",
+      "name": "Validate Auth",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        688,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "up-is-auth",
+      "name": "Is Authorized?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        912,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const auth = $('Validate Auth').first().json;\nconst requested = $('Extract Request').first().json.category;\nconst cats = auth.categories || [];\nconst UPLOAD_ROLES = ['super_admin','company_admin','group_admin'];\n\nif (!UPLOAD_ROLES.includes(auth.role)) {\n  return [{ json: { ...auth, error: 'Upload requires group_admin role or higher' } }];\n}\n\nconst cat = cats.find(c => c.name === requested || (c.table_name||'').includes(requested) || (c.table_name||'') === requested);\n\nif (!cat) {\n  return [{ json: { ...auth, error: 'Category not found or access denied' } }];\n}\n\nif (cat.can_upload === false) {\n  return [{ json: { ...auth, error: 'Upload permission denied for this category' } }];\n}\n\nreturn [{ json: { ...auth, selected_category: cat } }];"
+      },
+      "id": "up-check-perm",
+      "name": "Check Upload Permission",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true
+          },
+          "conditions": [
+            {
+              "id": "c2",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "up-perm-ok",
+      "name": "Can Upload?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ryzkcdvywxblsbyujtfv.supabase.co/rest/v1/files",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "company_id",
+              "value": "={{ $('Check Upload Permission').first().json.company_id }}"
+            },
+            {
+              "name": "category_id",
+              "value": "={{ $('Check Upload Permission').first().json.selected_category.category_id }}"
+            },
+            {
+              "name": "file_name",
+              "value": "={{ $('Extract Request').first().json.filename }}"
+            },
+            {
+              "name": "file_path",
+              "value": "=TrustRAG/{{ $('Check Upload Permission').first().json.company_id }}/{{ $('Extract Request').first().json.filename }}"
+            },
+            {
+              "name": "drive_file_id",
+              "value": ""
+            },
+            {
+              "name": "file_size",
+              "value": "={{ $('Extract Request').first().json.filesize }}"
+            },
+            {
+              "name": "mime_type",
+              "value": "={{ $('Extract Request').first().json.mimetype }}"
+            },
+            {
+              "name": "chunk_count",
+              "value": "={{ $('Aggregate Results').first().json.data ? $('Aggregate Results').first().json.data.length : 1 }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "up-save-meta",
+      "name": "Save File Metadata",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2224,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ryzkcdvywxblsbyujtfv.supabase.co/rest/v1/rpc/write_audit_log",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "p_user_id",
+              "value": "={{ $('Check Upload Permission').first().json.user_id }}"
+            },
+            {
+              "name": "p_company_id",
+              "value": "={{ $('Check Upload Permission').first().json.company_id }}"
+            },
+            {
+              "name": "p_action",
+              "value": "upload"
+            },
+            {
+              "name": "p_category_id",
+              "value": "={{ $('Check Upload Permission').first().json.selected_category.category_id }}"
+            },
+            {
+              "name": "p_file_id",
+              "value": "={{ $('Save File Metadata').first().json.id }}"
+            },
+            {
+              "name": "p_query_text",
+              "value": "={{ $('Extract Request').first().json.filename }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "up-audit",
+      "name": "Write Audit Log",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2448,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ JSON.stringify({\n  success: true,\n  filename: $('Extract Request').first().json.filename,\n  category: $('Extract Request').first().json.category,\n  chunks: $('Aggregate Results').first().json.length || 1,\n  message: '문서가 성공적으로 업로드되었습니다'\n}) }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "up-return",
+      "name": "Return Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2672,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ JSON.stringify({ success: false, message: $('Validate Auth').first().json.error || 'Unauthorized' }) }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "up-auth-err",
+      "name": "Return Auth Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1120,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ JSON.stringify({ success: false, message: $('Check Upload Permission').first().json.error || 'Permission denied' }) }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "up-perm-err",
+      "name": "Return Permission Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1568,
+        304
+      ]
+    },
+    {
+      "id": "up-extract-text",
+      "name": "Extract and Chunk Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        100
+      ],
+      "parameters": {
+        "jsCode": "const req = $('Extract Request').first().json;\nconst perm = $('Check Upload Permission').first().json;\n\n// base64 디코드\nconst text = Buffer.from(req.filedata, 'base64').toString('utf8');\n\n// 단락 기준으로 청크 분할 (최대 1000자)\nconst paragraphs = text.split(/\\n\\n+/).filter(p => p.trim().length > 0);\nconst chunks = [];\nlet current = '';\n\nfor (const para of paragraphs) {\n  if ((current + '\\n\\n' + para).length > 800) {\n    if (current) chunks.push(current.trim());\n    current = para;\n  } else {\n    current = current ? current + '\\n\\n' + para : para;\n  }\n}\nif (current.trim()) chunks.push(current.trim());\n\nconst metadata = {\n  source_filename: req.filename,\n  filesize: req.filesize,\n  mimetype: req.mimetype,\n  category: req.category,\n  uploaded_at: new Date().toISOString()\n};\n\nreturn chunks.map((chunk, i) => ({\n  json: {\n    chunk,\n    chunk_index: i,\n    total_chunks: chunks.length,\n    metadata,\n    company_id: perm.company_id,\n    table_name: perm.selected_category.table_name,\n    filename: req.filename\n  }\n}));"
+      }
+    },
+    {
+      "id": "up-embed-http",
+      "name": "Get Chunk Embedding",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1560,
+        100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/embeddings",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer OPENAI_API_KEY_HERE"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "text-embedding-ada-002"
+            },
+            {
+              "name": "input",
+              "value": "={{ $json.chunk }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "up-insert-vector",
+      "name": "Insert into Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1780,
+        100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://ryzkcdvywxblsbyujtfv.supabase.co/rest/v1/' + $('Extract and Chunk Text').item.json.table_name }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "content",
+              "value": "={{ $(\"Extract and Chunk Text\").item.json.chunk }}"
+            },
+            {
+              "name": "metadata",
+              "value": "={{ $(\"Extract and Chunk Text\").item.json.metadata }}"
+            },
+            {
+              "name": "embedding",
+              "value": "={{ $json.data[0].embedding }}"
+            },
+            {
+              "name": "company_id",
+              "value": "={{ $(\"Extract and Chunk Text\").item.json.company_id }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "up-aggregate",
+      "name": "Aggregate Results",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        2000,
+        100
+      ],
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Upload Webhook": {
+      "main": [
+        [
+          {
+            "node": "Extract Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Request": {
+      "main": [
+        [
+          {
+            "node": "Validate Auth",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Auth": {
+      "main": [
+        [
+          {
+            "node": "Is Authorized?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Authorized?": {
+      "main": [
+        [
+          {
+            "node": "Check Upload Permission",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Auth Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Upload Permission": {
+      "main": [
+        [
+          {
+            "node": "Can Upload?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Can Upload?": {
+      "main": [
+        [
+          {
+            "node": "Extract and Chunk Text",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Permission Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save File Metadata": {
+      "main": [
+        [
+          {
+            "node": "Write Audit Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Audit Log": {
+      "main": [
+        [
+          {
+            "node": "Return Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Embeddings": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Supabase Vector Store",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract and Chunk Text": {
+      "main": [
+        [
+          {
+            "node": "Get Chunk Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Chunk Embedding": {
+      "main": [
+        [
+          {
+            "node": "Insert into Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert into Supabase": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Results": {
+      "main": [
+        [
+          {
+            "node": "Save File Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": null,
+  "pinData": {},
+  "versionId": "270c8a48-215d-4e5b-99ba-c57fe09322e8",
+  "activeVersionId": "270c8a48-215d-4e5b-99ba-c57fe09322e8",
+  "versionCounter": 26,
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-02-28T09:27:07.883Z",
+      "createdAt": "2026-02-28T09:27:07.883Z",
+      "role": "workflow:owner",
+      "workflowId": "ZrdgEqchaCSoycyP",
+      "projectId": "gYkSZvHl0guLtWX6",
+      "project": {
+        "updatedAt": "2026-01-14T06:41:15.180Z",
+        "createdAt": "2026-01-14T06:41:10.535Z",
+        "id": "gYkSZvHl0guLtWX6",
+        "name": "nohjinkwang   <thomasnoh@kakao.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "e1385cb4-ffed-49bb-b7eb-befd0ffea08e"
+      }
+    }
+  ],
+  "tags": [
+    {
+      "updatedAt": "2026-02-28T09:16:08.452Z",
+      "createdAt": "2026-02-28T09:16:08.452Z",
+      "id": "NfABXWBLBlTX32Jy",
+      "name": "TrustRAG"
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-03-01T01:16:03.057Z",
+    "createdAt": "2026-03-01T01:16:03.057Z",
+    "versionId": "270c8a48-215d-4e5b-99ba-c57fe09322e8",
+    "workflowId": "ZrdgEqchaCSoycyP",
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "trustrag/upload",
+          "responseMode": "responseNode",
+          "options": {
+            "allowedOrigins": "*"
+          }
+        },
+        "id": "up-webhook",
+        "name": "Upload Webhook",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [
+          240,
+          304
+        ],
+        "webhookId": "tr-upload"
+      },
+      {
+        "parameters": {
+          "jsCode": "const body = $input.first().json.body || $input.first().json;\nreturn [{ json: { api_key: (body.api_key||'').trim(), category: body.category||'', filename: body.filename||'', filedata: body.filedata||'', filesize: body.filesize||0, mimetype: body.mimetype||'application/octet-stream' } }];"
+        },
+        "id": "up-extract",
+        "name": "Extract Request",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          464,
+          304
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://ryzkcdvywxblsbyujtfv.supabase.co/rest/v1/rpc/get_user_permissions",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "apikey",
+                "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+              },
+              {
+                "name": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "p_api_key",
+                "value": "={{ $('Extract Request').first().json.api_key }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "up-validate",
+        "name": "Validate Auth",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          688,
+          304
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true
+            },
+            "conditions": [
+              {
+                "id": "c1",
+                "leftValue": "={{ $json.error }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "string",
+                  "operation": "empty",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "up-is-auth",
+        "name": "Is Authorized?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          912,
+          304
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const auth = $('Validate Auth').first().json;\nconst requested = $('Extract Request').first().json.category;\nconst cats = auth.categories || [];\nconst UPLOAD_ROLES = ['super_admin','company_admin','group_admin'];\n\nif (!UPLOAD_ROLES.includes(auth.role)) {\n  return [{ json: { ...auth, error: 'Upload requires group_admin role or higher' } }];\n}\n\nconst cat = cats.find(c => c.name === requested || (c.table_name||'').includes(requested) || (c.table_name||'') === requested);\n\nif (!cat) {\n  return [{ json: { ...auth, error: 'Category not found or access denied' } }];\n}\n\nif (cat.can_upload === false) {\n  return [{ json: { ...auth, error: 'Upload permission denied for this category' } }];\n}\n\nreturn [{ json: { ...auth, selected_category: cat } }];"
+        },
+        "id": "up-check-perm",
+        "name": "Check Upload Permission",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1120,
+          192
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true
+            },
+            "conditions": [
+              {
+                "id": "c2",
+                "leftValue": "={{ $json.error }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "string",
+                  "operation": "empty",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "up-perm-ok",
+        "name": "Can Upload?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          1344,
+          192
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://ryzkcdvywxblsbyujtfv.supabase.co/rest/v1/files",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "apikey",
+                "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+              },
+              {
+                "name": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "Prefer",
+                "value": "return=representation"
+              }
+            ]
+          },
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "company_id",
+                "value": "={{ $('Check Upload Permission').first().json.company_id }}"
+              },
+              {
+                "name": "category_id",
+                "value": "={{ $('Check Upload Permission').first().json.selected_category.category_id }}"
+              },
+              {
+                "name": "file_name",
+                "value": "={{ $('Extract Request').first().json.filename }}"
+              },
+              {
+                "name": "file_path",
+                "value": "=TrustRAG/{{ $('Check Upload Permission').first().json.company_id }}/{{ $('Extract Request').first().json.filename }}"
+              },
+              {
+                "name": "drive_file_id",
+                "value": ""
+              },
+              {
+                "name": "file_size",
+                "value": "={{ $('Extract Request').first().json.filesize }}"
+              },
+              {
+                "name": "mime_type",
+                "value": "={{ $('Extract Request').first().json.mimetype }}"
+              },
+              {
+                "name": "chunk_count",
+                "value": "={{ $('Aggregate Results').first().json.data ? $('Aggregate Results').first().json.data.length : 1 }}"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            }
+          }
+        },
+        "id": "up-save-meta",
+        "name": "Save File Metadata",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2224,
+          128
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://ryzkcdvywxblsbyujtfv.supabase.co/rest/v1/rpc/write_audit_log",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "apikey",
+                "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+              },
+              {
+                "name": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "p_user_id",
+                "value": "={{ $('Check Upload Permission').first().json.user_id }}"
+              },
+              {
+                "name": "p_company_id",
+                "value": "={{ $('Check Upload Permission').first().json.company_id }}"
+              },
+              {
+                "name": "p_action",
+                "value": "upload"
+              },
+              {
+                "name": "p_category_id",
+                "value": "={{ $('Check Upload Permission').first().json.selected_category.category_id }}"
+              },
+              {
+                "name": "p_file_id",
+                "value": "={{ $('Save File Metadata').first().json.id }}"
+              },
+              {
+                "name": "p_query_text",
+                "value": "={{ $('Extract Request').first().json.filename }}"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            }
+          }
+        },
+        "id": "up-audit",
+        "name": "Write Audit Log",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2448,
+          128
+        ]
+      },
+      {
+        "parameters": {
+          "respondWith": "text",
+          "responseBody": "={{ JSON.stringify({\n  success: true,\n  filename: $('Extract Request').first().json.filename,\n  category: $('Extract Request').first().json.category,\n  chunks: $('Aggregate Results').first().json.length || 1,\n  message: '문서가 성공적으로 업로드되었습니다'\n}) }}",
+          "options": {
+            "responseHeaders": {
+              "entries": [
+                {
+                  "name": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "name": "Access-Control-Allow-Origin",
+                  "value": "*"
+                }
+              ]
+            }
+          }
+        },
+        "id": "up-return",
+        "name": "Return Response",
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.1,
+        "position": [
+          2672,
+          128
+        ]
+      },
+      {
+        "parameters": {
+          "respondWith": "text",
+          "responseBody": "={{ JSON.stringify({ success: false, message: $('Validate Auth').first().json.error || 'Unauthorized' }) }}",
+          "options": {
+            "responseHeaders": {
+              "entries": [
+                {
+                  "name": "Content-Type",
+                  "value": "application/json"
+                }
+              ]
+            }
+          }
+        },
+        "id": "up-auth-err",
+        "name": "Return Auth Error",
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.1,
+        "position": [
+          1120,
+          448
+        ]
+      },
+      {
+        "parameters": {
+          "respondWith": "text",
+          "responseBody": "={{ JSON.stringify({ success: false, message: $('Check Upload Permission').first().json.error || 'Permission denied' }) }}",
+          "options": {
+            "responseHeaders": {
+              "entries": [
+                {
+                  "name": "Content-Type",
+                  "value": "application/json"
+                }
+              ]
+            }
+          }
+        },
+        "id": "up-perm-err",
+        "name": "Return Permission Error",
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.1,
+        "position": [
+          1568,
+          304
+        ]
+      },
+      {
+        "id": "up-extract-text",
+        "name": "Extract and Chunk Text",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1340,
+          100
+        ],
+        "parameters": {
+          "jsCode": "const req = $('Extract Request').first().json;\nconst perm = $('Check Upload Permission').first().json;\n\n// base64 디코드\nconst text = Buffer.from(req.filedata, 'base64').toString('utf8');\n\n// 단락 기준으로 청크 분할 (최대 1000자)\nconst paragraphs = text.split(/\\n\\n+/).filter(p => p.trim().length > 0);\nconst chunks = [];\nlet current = '';\n\nfor (const para of paragraphs) {\n  if ((current + '\\n\\n' + para).length > 800) {\n    if (current) chunks.push(current.trim());\n    current = para;\n  } else {\n    current = current ? current + '\\n\\n' + para : para;\n  }\n}\nif (current.trim()) chunks.push(current.trim());\n\nconst metadata = {\n  source_filename: req.filename,\n  filesize: req.filesize,\n  mimetype: req.mimetype,\n  category: req.category,\n  uploaded_at: new Date().toISOString()\n};\n\nreturn chunks.map((chunk, i) => ({\n  json: {\n    chunk,\n    chunk_index: i,\n    total_chunks: chunks.length,\n    metadata,\n    company_id: perm.company_id,\n    table_name: perm.selected_category.table_name,\n    filename: req.filename\n  }\n}));"
+        }
+      },
+      {
+        "id": "up-embed-http",
+        "name": "Get Chunk Embedding",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1560,
+          100
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.openai.com/v1/embeddings",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "Bearer OPENAI_API_KEY_HERE"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "json",
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "model",
+                "value": "text-embedding-ada-002"
+              },
+              {
+                "name": "input",
+                "value": "={{ $json.chunk }}"
+              }
+            ]
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "up-insert-vector",
+        "name": "Insert into Supabase",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1780,
+          100
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "={{ 'https://ryzkcdvywxblsbyujtfv.supabase.co/rest/v1/' + $('Extract and Chunk Text').item.json.table_name }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "apikey",
+                "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+              },
+              {
+                "name": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "Prefer",
+                "value": "return=minimal"
+              }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "json",
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "content",
+                "value": "={{ $(\"Extract and Chunk Text\").item.json.chunk }}"
+              },
+              {
+                "name": "metadata",
+                "value": "={{ $(\"Extract and Chunk Text\").item.json.metadata }}"
+              },
+              {
+                "name": "embedding",
+                "value": "={{ $json.data[0].embedding }}"
+              },
+              {
+                "name": "company_id",
+                "value": "={{ $(\"Extract and Chunk Text\").item.json.company_id }}"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "up-aggregate",
+        "name": "Aggregate Results",
+        "type": "n8n-nodes-base.aggregate",
+        "typeVersion": 1,
+        "position": [
+          2000,
+          100
+        ],
+        "parameters": {
+          "aggregate": "aggregateAllItemData",
+          "options": {}
+        }
+      }
+    ],
+    "connections": {
+      "Upload Webhook": {
+        "main": [
+          [
+            {
+              "node": "Extract Request",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extract Request": {
+        "main": [
+          [
+            {
+              "node": "Validate Auth",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Validate Auth": {
+        "main": [
+          [
+            {
+              "node": "Is Authorized?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Is Authorized?": {
+        "main": [
+          [
+            {
+              "node": "Check Upload Permission",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Return Auth Error",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Check Upload Permission": {
+        "main": [
+          [
+            {
+              "node": "Can Upload?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Can Upload?": {
+        "main": [
+          [
+            {
+              "node": "Extract and Chunk Text",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Return Permission Error",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Save File Metadata": {
+        "main": [
+          [
+            {
+              "node": "Write Audit Log",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Write Audit Log": {
+        "main": [
+          [
+            {
+              "node": "Return Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Upload Embeddings": {
+        "ai_embedding": [
+          [
+            {
+              "node": "Supabase Vector Store",
+              "type": "ai_embedding",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extract and Chunk Text": {
+        "main": [
+          [
+            {
+              "node": "Get Chunk Embedding",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Get Chunk Embedding": {
+        "main": [
+          [
+            {
+              "node": "Insert into Supabase",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Insert into Supabase": {
+        "main": [
+          [
+            {
+              "node": "Aggregate Results",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Aggregate Results": {
+        "main": [
+          [
+            {
+              "node": "Save File Metadata",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "nohjinkwang  ",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-03-01T01:16:03.577Z",
+        "id": 134,
+        "workflowId": "ZrdgEqchaCSoycyP",
+        "versionId": "270c8a48-215d-4e5b-99ba-c57fe09322e8",
+        "event": "activated",
+        "userId": "e1385cb4-ffed-49bb-b7eb-befd0ffea08e"
+      }
+    ]
+  }
+}

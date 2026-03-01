@@ -22,8 +22,8 @@
 |--------|------|------|
 | **DB / 벡터** | Supabase PostgreSQL + pgvector | 새 프로젝트 (1차와 별도) |
 | **워크플로우** | n8n Cloud | 기존 인스턴스에 새 워크플로우 추가 |
-| **AI / 임베딩** | OpenAI (GPT-4.1 + text-embedding-ada-002) | 1차와 동일 |
-| **파일 저장** | Google Drive | 경로: TrustRAG/{company}/{category}/{file} |
+| **AI / 임베딩** | OpenAI (GPT-4o-mini + text-embedding-ada-002) | HTTP 직접 호출 방식 |
+| **파일 저장** | Supabase PostgreSQL (벡터 직접 저장) | Google Drive 불필요 |
 | **프론트엔드** | 정적 HTML + Netlify | office-ai.app/trust/ 서브 경로 |
 | **소스관리** | GitHub | 저장소: nohyohan0727-byte/TrustRAG |
 | **개발 도구** | Claude Code + Cursor (병행) | 단계별 히스토리 공유 |
@@ -120,7 +120,8 @@ TrustRAG/
 | Phase 1 | n8n 워크플로우 생성 (Auth/Chat/Upload/Admin) | ✅ 완료 |
 | Phase 2 | Supabase 프로젝트 생성 + DB 스키마 실행 | ✅ 완료 |
 | Phase 3 | n8n 워크플로우 Supabase 연결 + 활성화 | ✅ 완료 |
-| Phase 4 | 엔드투엔드 테스트 (Auth → Chat → Upload → Admin) | 🔲 대기 |
+| Phase 4 | 엔드투엔드 테스트 (Auth → Chat → Upload → Admin) | ✅ 완료 |
+| Phase 4.5 | 테스트 페이지 (office-ai.app/trustrag/) | ✅ 완료 |
 | Phase 5 | 프론트엔드 (office-ai.app/trust/) | 🔲 대기 |
 | Phase 6 | 감사 로그 대시보드 + 보안 강화 | 🔲 대기 |
 

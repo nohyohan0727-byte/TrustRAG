@@ -10,15 +10,47 @@
 
 | 항목 | 현재 상태 |
 |------|-----------|
-| **진행 Phase** | Phase 0~3 완료 → Phase 4 (엔드투엔드 테스트) |
+| **진행 Phase** | Phase 0~4 완료 (엔드투엔드 RAG 테스트 성공) |
 | **Supabase** | `ryzkcdvywxblsbyujtfv` (활성) |
-| **n8n 워크플로우** | 4개 생성 + 활성화 완료 |
-| **프론트엔드** | 미생성 |
-| **마지막 작업일** | 2026-02-28 |
+| **n8n 워크플로우** | 4개 생성 + 활성화 + 전체 동작 확인 |
+| **프론트엔드** | 테스트 페이지: office-ai.app/trustrag/{chat,upload,admin}.html |
+| **마지막 작업일** | 2026-03-01 |
 
 ---
 
 ## 작업 이력
+
+---
+
+### [2026-03-01] Phase 4 — 엔드투엔드 테스트 + 워크플로우 버그 수정
+
+| 항목 | 내용 |
+|------|------|
+| **작업자** | nohyohan0727-byte + Claude (Sonnet 4.6) |
+| **상태** | ✅ 완료 |
+
+**버그 수정:**
+- Admin, Chat, Upload 워크플로우의 IF 노드 boolean 비교 버그 → `error` 필드 empty 체크 패턴으로 수정
+- Chat 워크플로우: OpenAI LangChain 크레덴셜 문제 → HTTP Request 직접 호출로 교체
+- Upload 워크플로우: Google Drive binary 오류 → HTTP 임베딩+Supabase 직접 저장 방식으로 재설계
+- Extract Sources: `$input.first()` → `$input.all()` 수정으로 검색 결과 정상 반환
+- Supabase 벡터 테이블 수동 생성 (`tr_jknetworks_ks_cert`, `tr_jknetworks_iso_cert`)
+
+**최종 테스트 결과:**
+- Auth: ✅ `trust_super_25a70cd8-5535-4197-b086-624203db2d9e` API 키 인증 성공
+- Admin: ✅ create_category / list_users / get_audit_logs 동작
+- Upload: ✅ `KS인증_개요.txt` 업로드 → 임베딩 → Supabase 저장 성공
+- Chat: ✅ 실제 문서 기반 RAG 답변 (유사도 0.89, 내부 문서 참조)
+
+**현재 구조:**
+- OpenAI: HTTP Request 직접 호출 (text-embedding-ada-002, gpt-4o-mini)
+- Supabase: REST API 직접 호출 (벡터 저장/검색)
+- 토큰 차감: 정상 동작 (99999 → 99996)
+
+**테스트 페이지:**
+- https://office-ai.app/trustrag/chat.html
+- https://office-ai.app/trustrag/upload.html
+- https://office-ai.app/trustrag/admin.html
 
 ---
 

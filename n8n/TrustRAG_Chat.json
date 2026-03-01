@@ -1,1 +1,1454 @@
-{"updatedAt":"2026-02-28T09:22:26.085Z","createdAt":"2026-02-28T09:22:26.085Z","id":"Oo9ThEBXSg3QUv4L","name":"TrustRAG_Chat","description":null,"active":false,"isArchived":false,"nodes":[{"id":"chat-webhook","name":"Secure Chat Webhook","type":"n8n-nodes-base.webhook","typeVersion":2,"position":[240,300],"parameters":{"httpMethod":"POST","path":"trustrag/chat","responseMode":"responseNode","options":{"allowedOrigins":"*"}}},{"id":"chat-extract","name":"Extract Request","type":"n8n-nodes-base.code","typeVersion":2,"position":[460,300],"parameters":{"jsCode":"const body = $input.first().json.body || $input.first().json;\nreturn [{ json: { api_key: (body.api_key||'').trim(), session_id: body.session_id||'default', message: body.message||'', category: body.category||'' } }];"}},{"id":"chat-validate","name":"Validate Auth","type":"n8n-nodes-base.httpRequest","typeVersion":4.2,"position":[680,300],"parameters":{"method":"POST","url":"TRUSTRAG_SUPABASE_URL_HERE/rest/v1/rpc/get_user_permissions","sendHeaders":true,"headerParameters":{"parameters":[{"name":"apikey","value":"TRUSTRAG_SERVICE_KEY_HERE"},{"name":"Authorization","value":"Bearer TRUSTRAG_SERVICE_KEY_HERE"},{"name":"Content-Type","value":"application/json"}]},"sendBody":true,"contentType":"json","bodyParameters":{"parameters":[{"name":"p_api_key","value":"={{ $('Extract Request').first().json.api_key }}"}]},"options":{}}},{"id":"chat-is-auth","name":"Is Authorized?","type":"n8n-nodes-base.if","typeVersion":2,"position":[900,300],"parameters":{"conditions":{"options":{"caseSensitive":true},"conditions":[{"id":"c1","leftValue":"={{ $json.error }}","rightValue":"","operator":{"type":"string","operation":"empty","singleValue":true}}],"combinator":"and"}}},{"id":"chat-check-cat","name":"Check Category Access","type":"n8n-nodes-base.code","typeVersion":2,"position":[1120,180],"parameters":{"jsCode":"const auth = $('Validate Auth').first().json;\nconst requested = $('Extract Request').first().json.category;\nconst cats = auth.categories || [];\nif (auth.role === 'super_admin') {\n  const cat = cats.find(c => c.name === requested || (c.table_name||'').includes(requested)) || cats[0] || { name: requested, table_name: 'tr_default' };\n  return [{ json: { ...auth, selected_category: cat, allowed: true } }];\n}\nconst allowed = cats.find(c => c.name === requested || (c.table_name||'').includes(requested));\nif (!allowed) return [{ json: { ...auth, allowed: false, error: 'Category access denied' } }];\nreturn [{ json: { ...auth, selected_category: allowed, allowed: true } }];"}},{"id":"chat-cat-ok","name":"Category OK?","type":"n8n-nodes-base.if","typeVersion":2,"position":[1340,180],"parameters":{"conditions":{"options":{"caseSensitive":true},"conditions":[{"id":"c2","leftValue":"={{ $json.allowed }}","rightValue":true,"operator":{"type":"boolean","operation":"equal"}}],"combinator":"and"}}},{"id":"chat-embed","name":"Get Query Embedding","type":"n8n-nodes-base.httpRequest","typeVersion":4.2,"position":[1560,100],"parameters":{"method":"POST","url":"https://api.openai.com/v1/embeddings","sendHeaders":true,"headerParameters":{"parameters":[{"name":"Authorization","value":"Bearer OPENAI_API_KEY_HERE"},{"name":"Content-Type","value":"application/json"}]},"sendBody":true,"contentType":"json","bodyParameters":{"parameters":[{"name":"model","value":"text-embedding-ada-002"},{"name":"input","value":"={{ $('Extract Request').first().json.message }}"}]},"options":{}}},{"id":"chat-search","name":"Search Source Docs","type":"n8n-nodes-base.httpRequest","typeVersion":4.2,"position":[1780,100],"parameters":{"method":"POST","url":"=TRUSTRAG_SUPABASE_URL_HERE/rest/v1/rpc/match_documents_{{ $('Check Category Access').first().json.selected_category.table_name }}","sendHeaders":true,"headerParameters":{"parameters":[{"name":"apikey","value":"TRUSTRAG_SERVICE_KEY_HERE"},{"name":"Authorization","value":"Bearer TRUSTRAG_SERVICE_KEY_HERE"},{"name":"Content-Type","value":"application/json"}]},"sendBody":true,"contentType":"json","bodyParameters":{"parameters":[{"name":"query_embedding","value":"={{ $json.data[0].embedding }}"},{"name":"p_company_id","value":"={{ $('Check Category Access').first().json.company_id }}"},{"name":"match_count","value":5},{"name":"similarity_threshold","value":0.5}]},"options":{"response":{"response":{"neverError":true}}}}},{"id":"chat-sources","name":"Extract Sources","type":"n8n-nodes-base.code","typeVersion":2,"position":[2000,100],"parameters":{"jsCode":"const results = Array.isArray($input.first().json) ? $input.first().json : [];\nconst sources = results.filter(r => r.metadata && r.metadata.source_filename).map(r => ({ filename: r.metadata.source_filename, drive_url: r.metadata.source_drive_url || null, similarity: Math.round((r.similarity||0)*100)/100 }));\nconst unique = sources.filter((s,i,a) => a.findIndex(x=>x.filename===s.filename)===i);\nreturn [{ json: { sources: unique, raw_results: results } }];"}},{"id":"chat-prompt","name":"Build System Prompt","type":"n8n-nodes-base.code","typeVersion":2,"position":[2220,100],"parameters":{"jsCode":"const auth = $('Check Category Access').first().json;\nconst catName = (auth.selected_category && auth.selected_category.name) || 'General';\nconst raw = $('Extract Sources').first().json.raw_results || [];\nconst ROLES = { 'KS인증':'KS 인증 심사원', '비즈니스':'비즈니스 전략 전문가', '기술문서':'기술 규격 전문가', '업무관리':'행정 운영 전문가' };\nconst role = ROLES[catName] || (catName + ' 전문가');\nconst docCtx = raw.length > 0 ? raw.map((d,i) => '[문서'+(i+1)+'] '+d.content).join('\\n\\n') : '(관련 내부 문서 없음)';\nconst prompt = '당신은 '+role+'입니다.\\n\\n[내부 문서]\\n'+docCtx+'\\n\\n[지시사항]\\n1. 내부 문서를 우선 참조하세요.\\n2. 내부 문서 답변 시 \"내부 문서 기준으로는:\" 로 시작하세요.\\n3. 없을 때만 일반 지식으로 보완하세요.';\nreturn [{ json: { system_prompt: prompt } }];"}},{"id":"chat-agent","name":"RAG AI Agent","type":"@n8n/n8n-nodes-langchain.agent","typeVersion":1.7,"position":[2440,100],"parameters":{"promptType":"define","text":"={{ $('Extract Request').first().json.message }}","systemMessage":"={{ $('Build System Prompt').first().json.system_prompt }}","options":{"sessionIdType":"customKey","sessionKey":"={{ $('Extract Request').first().json.session_id }}"}}},{"id":"chat-llm","name":"OpenAI Chat Model","type":"@n8n/n8n-nodes-langchain.lmChatOpenAi","typeVersion":1.2,"position":[2360,300],"parameters":{"model":"gpt-4.1-mini","options":{}}},{"id":"chat-mem","name":"User Session Memory","type":"@n8n/n8n-nodes-langchain.memoryBufferWindow","typeVersion":1.3,"position":[2520,300],"parameters":{"sessionKey":"={{ $('Extract Request').first().json.session_id }}","contextWindowLength":10}},{"id":"chat-audit","name":"Write Audit Log","type":"n8n-nodes-base.httpRequest","typeVersion":4.2,"position":[2660,100],"parameters":{"method":"POST","url":"TRUSTRAG_SUPABASE_URL_HERE/rest/v1/rpc/write_audit_log","sendHeaders":true,"headerParameters":{"parameters":[{"name":"apikey","value":"TRUSTRAG_SERVICE_KEY_HERE"},{"name":"Authorization","value":"Bearer TRUSTRAG_SERVICE_KEY_HERE"},{"name":"Content-Type","value":"application/json"}]},"sendBody":true,"contentType":"json","bodyParameters":{"parameters":[{"name":"p_user_id","value":"={{ $('Check Category Access').first().json.user_id }}"},{"name":"p_company_id","value":"={{ $('Check Category Access').first().json.company_id }}"},{"name":"p_action","value":"search"},{"name":"p_query_text","value":"={{ $('Extract Request').first().json.message }}"},{"name":"p_response_summary","value":"={{ ($('RAG AI Agent').first().json.output||'').substring(0,300) }}"},{"name":"p_session_id","value":"={{ $('Extract Request').first().json.session_id }}"}]},"options":{"response":{"response":{"neverError":true}}}}},{"id":"chat-deduct","name":"Deduct Token","type":"n8n-nodes-base.httpRequest","typeVersion":4.2,"position":[2880,100],"parameters":{"method":"POST","url":"TRUSTRAG_SUPABASE_URL_HERE/rest/v1/rpc/deduct_token","sendHeaders":true,"headerParameters":{"parameters":[{"name":"apikey","value":"TRUSTRAG_SERVICE_KEY_HERE"},{"name":"Authorization","value":"Bearer TRUSTRAG_SERVICE_KEY_HERE"},{"name":"Content-Type","value":"application/json"}]},"sendBody":true,"contentType":"json","bodyParameters":{"parameters":[{"name":"p_user_id","value":"={{ $('Check Category Access').first().json.user_id }}"}]},"options":{}}},{"id":"chat-return","name":"Return Response","type":"n8n-nodes-base.respondToWebhook","typeVersion":1.1,"position":[3100,100],"parameters":{"respondWith":"text","responseBody":"={{ JSON.stringify({ success: true, response: $('RAG AI Agent').first().json.output, tokens_remaining: $json, sources: $('Extract Sources').first().json.sources }) }}","options":{"responseHeaders":{"entries":[{"name":"Content-Type","value":"application/json"},{"name":"Access-Control-Allow-Origin","value":"*"}]}}}},{"id":"chat-auth-err","name":"Return Auth Error","type":"n8n-nodes-base.respondToWebhook","typeVersion":1.1,"position":[1120,440],"parameters":{"respondWith":"text","responseCode":401,"responseBody":"={{ JSON.stringify({ success: false, message: $('Validate Auth').first().json.error || 'Unauthorized' }) }}","options":{"responseHeaders":{"entries":[{"name":"Content-Type","value":"application/json"}]}}}},{"id":"chat-cat-err","name":"Return Category Error","type":"n8n-nodes-base.respondToWebhook","typeVersion":1.1,"position":[1560,300],"parameters":{"respondWith":"text","responseCode":403,"responseBody":"={{ JSON.stringify({ success: false, message: $('Check Category Access').first().json.error || 'Category access denied' }) }}","options":{"responseHeaders":{"entries":[{"name":"Content-Type","value":"application/json"}]}}}}],"connections":{"Secure Chat Webhook":{"main":[[{"node":"Extract Request","type":"main","index":0}]]},"Extract Request":{"main":[[{"node":"Validate Auth","type":"main","index":0}]]},"Validate Auth":{"main":[[{"node":"Is Authorized?","type":"main","index":0}]]},"Is Authorized?":{"main":[[{"node":"Check Category Access","type":"main","index":0}],[{"node":"Return Auth Error","type":"main","index":0}]]},"Check Category Access":{"main":[[{"node":"Category OK?","type":"main","index":0}]]},"Category OK?":{"main":[[{"node":"Get Query Embedding","type":"main","index":0}],[{"node":"Return Category Error","type":"main","index":0}]]},"Get Query Embedding":{"main":[[{"node":"Search Source Docs","type":"main","index":0}]]},"Search Source Docs":{"main":[[{"node":"Extract Sources","type":"main","index":0}]]},"Extract Sources":{"main":[[{"node":"Build System Prompt","type":"main","index":0}]]},"Build System Prompt":{"main":[[{"node":"RAG AI Agent","type":"main","index":0}]]},"RAG AI Agent":{"main":[[{"node":"Write Audit Log","type":"main","index":0}]]},"Write Audit Log":{"main":[[{"node":"Deduct Token","type":"main","index":0}]]},"Deduct Token":{"main":[[{"node":"Return Response","type":"main","index":0}]]},"OpenAI Chat Model":{"ai_languageModel":[[{"node":"RAG AI Agent","type":"ai_languageModel","index":0}]]},"User Session Memory":{"ai_memory":[[{"node":"RAG AI Agent","type":"ai_memory","index":0}]]}},"settings":{"executionOrder":"v1","callerPolicy":"workflowsFromSameOwner","availableInMCP":false},"staticData":null,"meta":null,"pinData":null,"versionId":"9e4c9260-9ce2-4028-a6c2-2fafbadb12a2","activeVersionId":null,"versionCounter":1,"triggerCount":0,"shared":[{"updatedAt":"2026-02-28T09:22:26.086Z","createdAt":"2026-02-28T09:22:26.086Z","role":"workflow:owner","workflowId":"Oo9ThEBXSg3QUv4L","projectId":"gYkSZvHl0guLtWX6","project":{"updatedAt":"2026-01-14T06:41:15.180Z","createdAt":"2026-01-14T06:41:10.535Z","id":"gYkSZvHl0guLtWX6","name":"nohjinkwang   <thomasnoh@kakao.com>","type":"personal","icon":null,"description":null,"creatorId":"e1385cb4-ffed-49bb-b7eb-befd0ffea08e"}}],"tags":[],"activeVersion":null}
+{
+  "updatedAt": "2026-03-01T01:19:28.546Z",
+  "createdAt": "2026-02-28T09:22:26.085Z",
+  "id": "Oo9ThEBXSg3QUv4L",
+  "name": "TrustRAG_Chat",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "trustrag/chat",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "chat-webhook",
+      "name": "Secure Chat Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        304
+      ],
+      "webhookId": "tr-chat"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || $input.first().json;\nreturn [{ json: { api_key: (body.api_key||'').trim(), session_id: body.session_id||'default', message: body.message||'', category: body.category||'' } }];"
+      },
+      "id": "chat-extract",
+      "name": "Extract Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        464,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ryzkcdvywxblsbyujtfv.supabase.co/rest/v1/rpc/get_user_permissions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "p_api_key",
+              "value": "={{ $('Extract Request').first().json.api_key }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "chat-validate",
+      "name": "Validate Auth",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        688,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "chat-is-auth",
+      "name": "Is Authorized?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        912,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const auth = $('Validate Auth').first().json;\nconst requested = $('Extract Request').first().json.category;\nconst cats = auth.categories || [];\n\nif (auth.role === 'super_admin') {\n  const cat = cats.find(c => c.name === requested || (c.table_name||'').includes(requested)) || cats[0] || { name: requested, table_name: requested };\n  return [{ json: { ...auth, selected_category: cat } }];\n}\n\nconst allowed = cats.find(c => c.name === requested || (c.table_name||'').includes(requested));\nif (!allowed) {\n  return [{ json: { ...auth, error: 'Category access denied' } }];\n}\nreturn [{ json: { ...auth, selected_category: allowed } }];"
+      },
+      "id": "chat-check-cat",
+      "name": "Check Category Access",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1136,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true
+          },
+          "conditions": [
+            {
+              "id": "c2",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "chat-cat-ok",
+      "name": "Category OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/embeddings",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer OPENAI_API_KEY_HERE"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "text-embedding-ada-002"
+            },
+            {
+              "name": "input",
+              "value": "={{ $('Extract Request').first().json.message }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "chat-embed",
+      "name": "Get Query Embedding",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1584,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://ryzkcdvywxblsbyujtfv.supabase.co/rest/v1/rpc/match_documents_{{ $('Check Category Access').first().json.selected_category.table_name }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "query_embedding",
+              "value": "={{ $json.data[0].embedding }}"
+            },
+            {
+              "name": "p_company_id",
+              "value": "={{ $('Check Category Access').first().json.company_id }}"
+            },
+            {
+              "name": "match_count",
+              "value": 5
+            },
+            {
+              "name": "similarity_threshold",
+              "value": 0.5
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "chat-search",
+      "name": "Search Source Docs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1808,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// n8n은 HTTP 응답 배열을 개별 아이템으로 분리\n// $input.all()로 모든 검색 결과를 수집\nconst allItems = $input.all();\nconst results = allItems.map(item => item.json).filter(r => r && r.content);\n\nconst sources = results\n  .filter(r => r.metadata)\n  .map(r => ({\n    filename: r.metadata.source_filename || r.metadata.filename || r.metadata.category || '알 수 없는 파일',\n    similarity: Math.round((r.similarity || 0) * 100) / 100\n  }))\n  .filter((s, i, a) => a.findIndex(x => x.filename === s.filename) === i); // 중복 제거\n\nreturn [{ json: { sources, raw_results: results } }];"
+      },
+      "id": "chat-sources",
+      "name": "Extract Sources",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2032,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const auth = $('Check Category Access').first().json;\nconst catName = (auth.selected_category && auth.selected_category.name) || 'General';\nconst raw = $('Extract Sources').first().json.raw_results || [];\n\nconst ROLES = {\n  'KS인증': 'KS 인증 심사원',\n  'ISO인증': 'ISO 심사원',\n  '비즈니스': '비즈니스 전략 전문가',\n  '기술문서': '기술 규격 전문가',\n  '업무관리': '행정 운영 전문가'\n};\nconst role = ROLES[catName] || (catName + ' 전문가');\n\nconst docCtx = raw.length > 0\n  ? raw.map((d, i) => '[문서' + (i + 1) + '] ' + d.content).join('\\n\\n')\n  : '(관련 내부 문서 없음)';\n\nconst prompt = '당신은 ' + role + '입니다.\\n\\n[내부 문서]\\n' + docCtx + '\\n\\n[지시사항]\\n1. 내부 문서를 우선 참조하세요.\\n2. 내부 문서 내용 답변 시 \"내부 문서 기준으로:\" 로 시작하세요.\\n3. 관련 내부 문서가 없을 때만 일반 지식으로 보완하세요.';\n\nreturn [{ json: { system_prompt: prompt } }];"
+      },
+      "id": "chat-prompt",
+      "name": "Build System Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2256,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ryzkcdvywxblsbyujtfv.supabase.co/rest/v1/rpc/write_audit_log",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "p_user_id",
+              "value": "={{ $('Check Category Access').first().json.user_id }}"
+            },
+            {
+              "name": "p_company_id",
+              "value": "={{ $('Check Category Access').first().json.company_id }}"
+            },
+            {
+              "name": "p_action",
+              "value": "search"
+            },
+            {
+              "name": "p_query_text",
+              "value": "={{ $('Extract Request').first().json.message }}"
+            },
+            {
+              "name": "p_response_summary",
+              "value": "={{ ($('Parse LLM Response').first().json.llm_response||'').substring(0,300) }}"
+            },
+            {
+              "name": "p_session_id",
+              "value": "={{ $('Extract Request').first().json.session_id }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "chat-audit",
+      "name": "Write Audit Log",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2832,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ryzkcdvywxblsbyujtfv.supabase.co/rest/v1/rpc/deduct_token",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "p_user_id",
+              "value": "={{ $('Check Category Access').first().json.user_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "chat-deduct",
+      "name": "Deduct Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3056,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ JSON.stringify({\n  success: true,\n  response: $('Parse LLM Response').first().json.llm_response,\n  tokens_remaining: $json,\n  sources: $('Extract Sources').first().json.sources\n}) }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "chat-return",
+      "name": "Return Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        3280,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ JSON.stringify({ success: false, message: $('Validate Auth').first().json.error || 'Unauthorized' }) }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "chat-auth-err",
+      "name": "Return Auth Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1136,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ JSON.stringify({ success: false, message: $('Check Category Access').first().json.error || 'Category access denied' }) }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "chat-cat-err",
+      "name": "Return Category Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1584,
+        304
+      ]
+    },
+    {
+      "id": "chat-llm-http",
+      "name": "Call OpenAI LLM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2440,
+        100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer OPENAI_API_KEY_HERE"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "gpt-4o-mini"
+            },
+            {
+              "name": "messages",
+              "value": "={{ [\n  { \"role\": \"system\", \"content\": $(\"Build System Prompt\").first().json.system_prompt },\n  { \"role\": \"user\", \"content\": $(\"Extract Request\").first().json.message }\n] }}"
+            },
+            {
+              "name": "max_tokens",
+              "value": 1000
+            },
+            {
+              "name": "temperature",
+              "value": 0.3
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "chat-parse-llm",
+      "name": "Parse LLM Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2660,
+        100
+      ],
+      "parameters": {
+        "jsCode": "const llmRes = $input.first().json;\nconst content = llmRes.choices && llmRes.choices[0] ? llmRes.choices[0].message.content : '응답 생성 실패';\nreturn [{ json: { llm_response: content } }];"
+      }
+    }
+  ],
+  "connections": {
+    "Secure Chat Webhook": {
+      "main": [
+        [
+          {
+            "node": "Extract Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Request": {
+      "main": [
+        [
+          {
+            "node": "Validate Auth",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Auth": {
+      "main": [
+        [
+          {
+            "node": "Is Authorized?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Authorized?": {
+      "main": [
+        [
+          {
+            "node": "Check Category Access",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Auth Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Category Access": {
+      "main": [
+        [
+          {
+            "node": "Category OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Category OK?": {
+      "main": [
+        [
+          {
+            "node": "Get Query Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Category Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Query Embedding": {
+      "main": [
+        [
+          {
+            "node": "Search Source Docs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Source Docs": {
+      "main": [
+        [
+          {
+            "node": "Extract Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Sources": {
+      "main": [
+        [
+          {
+            "node": "Build System Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build System Prompt": {
+      "main": [
+        [
+          {
+            "node": "Call OpenAI LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Audit Log": {
+      "main": [
+        [
+          {
+            "node": "Deduct Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deduct Token": {
+      "main": [
+        [
+          {
+            "node": "Return Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call OpenAI LLM": {
+      "main": [
+        [
+          {
+            "node": "Parse LLM Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse LLM Response": {
+      "main": [
+        [
+          {
+            "node": "Write Audit Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": null,
+  "pinData": {},
+  "versionId": "e40f9f12-d286-43e5-9ca3-207a862a18aa",
+  "activeVersionId": "e40f9f12-d286-43e5-9ca3-207a862a18aa",
+  "versionCounter": 29,
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-02-28T09:22:26.086Z",
+      "createdAt": "2026-02-28T09:22:26.086Z",
+      "role": "workflow:owner",
+      "workflowId": "Oo9ThEBXSg3QUv4L",
+      "projectId": "gYkSZvHl0guLtWX6",
+      "project": {
+        "updatedAt": "2026-01-14T06:41:15.180Z",
+        "createdAt": "2026-01-14T06:41:10.535Z",
+        "id": "gYkSZvHl0guLtWX6",
+        "name": "nohjinkwang   <thomasnoh@kakao.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "e1385cb4-ffed-49bb-b7eb-befd0ffea08e"
+      }
+    }
+  ],
+  "tags": [
+    {
+      "updatedAt": "2026-02-28T09:16:08.452Z",
+      "createdAt": "2026-02-28T09:16:08.452Z",
+      "id": "NfABXWBLBlTX32Jy",
+      "name": "TrustRAG"
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-03-01T01:19:28.547Z",
+    "createdAt": "2026-03-01T01:19:28.547Z",
+    "versionId": "e40f9f12-d286-43e5-9ca3-207a862a18aa",
+    "workflowId": "Oo9ThEBXSg3QUv4L",
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "trustrag/chat",
+          "responseMode": "responseNode",
+          "options": {
+            "allowedOrigins": "*"
+          }
+        },
+        "id": "chat-webhook",
+        "name": "Secure Chat Webhook",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [
+          240,
+          304
+        ],
+        "webhookId": "tr-chat"
+      },
+      {
+        "parameters": {
+          "jsCode": "const body = $input.first().json.body || $input.first().json;\nreturn [{ json: { api_key: (body.api_key||'').trim(), session_id: body.session_id||'default', message: body.message||'', category: body.category||'' } }];"
+        },
+        "id": "chat-extract",
+        "name": "Extract Request",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          464,
+          304
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://ryzkcdvywxblsbyujtfv.supabase.co/rest/v1/rpc/get_user_permissions",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "apikey",
+                "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+              },
+              {
+                "name": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "p_api_key",
+                "value": "={{ $('Extract Request').first().json.api_key }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "chat-validate",
+        "name": "Validate Auth",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          688,
+          304
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true
+            },
+            "conditions": [
+              {
+                "id": "c1",
+                "leftValue": "={{ $json.error }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "string",
+                  "operation": "empty",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "chat-is-auth",
+        "name": "Is Authorized?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          912,
+          304
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const auth = $('Validate Auth').first().json;\nconst requested = $('Extract Request').first().json.category;\nconst cats = auth.categories || [];\n\nif (auth.role === 'super_admin') {\n  const cat = cats.find(c => c.name === requested || (c.table_name||'').includes(requested)) || cats[0] || { name: requested, table_name: requested };\n  return [{ json: { ...auth, selected_category: cat } }];\n}\n\nconst allowed = cats.find(c => c.name === requested || (c.table_name||'').includes(requested));\nif (!allowed) {\n  return [{ json: { ...auth, error: 'Category access denied' } }];\n}\nreturn [{ json: { ...auth, selected_category: allowed } }];"
+        },
+        "id": "chat-check-cat",
+        "name": "Check Category Access",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1136,
+          208
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true
+            },
+            "conditions": [
+              {
+                "id": "c2",
+                "leftValue": "={{ $json.error }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "string",
+                  "operation": "empty",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "chat-cat-ok",
+        "name": "Category OK?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          1360,
+          208
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.openai.com/v1/embeddings",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "Bearer OPENAI_API_KEY_HERE"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "model",
+                "value": "text-embedding-ada-002"
+              },
+              {
+                "name": "input",
+                "value": "={{ $('Extract Request').first().json.message }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "chat-embed",
+        "name": "Get Query Embedding",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1584,
+          112
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "=https://ryzkcdvywxblsbyujtfv.supabase.co/rest/v1/rpc/match_documents_{{ $('Check Category Access').first().json.selected_category.table_name }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "apikey",
+                "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+              },
+              {
+                "name": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "query_embedding",
+                "value": "={{ $json.data[0].embedding }}"
+              },
+              {
+                "name": "p_company_id",
+                "value": "={{ $('Check Category Access').first().json.company_id }}"
+              },
+              {
+                "name": "match_count",
+                "value": 5
+              },
+              {
+                "name": "similarity_threshold",
+                "value": 0.5
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            }
+          }
+        },
+        "id": "chat-search",
+        "name": "Search Source Docs",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1808,
+          112
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "// n8n은 HTTP 응답 배열을 개별 아이템으로 분리\n// $input.all()로 모든 검색 결과를 수집\nconst allItems = $input.all();\nconst results = allItems.map(item => item.json).filter(r => r && r.content);\n\nconst sources = results\n  .filter(r => r.metadata)\n  .map(r => ({\n    filename: r.metadata.source_filename || r.metadata.filename || r.metadata.category || '알 수 없는 파일',\n    similarity: Math.round((r.similarity || 0) * 100) / 100\n  }))\n  .filter((s, i, a) => a.findIndex(x => x.filename === s.filename) === i); // 중복 제거\n\nreturn [{ json: { sources, raw_results: results } }];"
+        },
+        "id": "chat-sources",
+        "name": "Extract Sources",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2032,
+          112
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const auth = $('Check Category Access').first().json;\nconst catName = (auth.selected_category && auth.selected_category.name) || 'General';\nconst raw = $('Extract Sources').first().json.raw_results || [];\n\nconst ROLES = {\n  'KS인증': 'KS 인증 심사원',\n  'ISO인증': 'ISO 심사원',\n  '비즈니스': '비즈니스 전략 전문가',\n  '기술문서': '기술 규격 전문가',\n  '업무관리': '행정 운영 전문가'\n};\nconst role = ROLES[catName] || (catName + ' 전문가');\n\nconst docCtx = raw.length > 0\n  ? raw.map((d, i) => '[문서' + (i + 1) + '] ' + d.content).join('\\n\\n')\n  : '(관련 내부 문서 없음)';\n\nconst prompt = '당신은 ' + role + '입니다.\\n\\n[내부 문서]\\n' + docCtx + '\\n\\n[지시사항]\\n1. 내부 문서를 우선 참조하세요.\\n2. 내부 문서 내용 답변 시 \"내부 문서 기준으로:\" 로 시작하세요.\\n3. 관련 내부 문서가 없을 때만 일반 지식으로 보완하세요.';\n\nreturn [{ json: { system_prompt: prompt } }];"
+        },
+        "id": "chat-prompt",
+        "name": "Build System Prompt",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2256,
+          112
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://ryzkcdvywxblsbyujtfv.supabase.co/rest/v1/rpc/write_audit_log",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "apikey",
+                "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+              },
+              {
+                "name": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "p_user_id",
+                "value": "={{ $('Check Category Access').first().json.user_id }}"
+              },
+              {
+                "name": "p_company_id",
+                "value": "={{ $('Check Category Access').first().json.company_id }}"
+              },
+              {
+                "name": "p_action",
+                "value": "search"
+              },
+              {
+                "name": "p_query_text",
+                "value": "={{ $('Extract Request').first().json.message }}"
+              },
+              {
+                "name": "p_response_summary",
+                "value": "={{ ($('Parse LLM Response').first().json.llm_response||'').substring(0,300) }}"
+              },
+              {
+                "name": "p_session_id",
+                "value": "={{ $('Extract Request').first().json.session_id }}"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            }
+          }
+        },
+        "id": "chat-audit",
+        "name": "Write Audit Log",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2832,
+          112
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://ryzkcdvywxblsbyujtfv.supabase.co/rest/v1/rpc/deduct_token",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "apikey",
+                "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+              },
+              {
+                "name": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "p_user_id",
+                "value": "={{ $('Check Category Access').first().json.user_id }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "chat-deduct",
+        "name": "Deduct Token",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          3056,
+          112
+        ]
+      },
+      {
+        "parameters": {
+          "respondWith": "text",
+          "responseBody": "={{ JSON.stringify({\n  success: true,\n  response: $('Parse LLM Response').first().json.llm_response,\n  tokens_remaining: $json,\n  sources: $('Extract Sources').first().json.sources\n}) }}",
+          "options": {
+            "responseHeaders": {
+              "entries": [
+                {
+                  "name": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "name": "Access-Control-Allow-Origin",
+                  "value": "*"
+                }
+              ]
+            }
+          }
+        },
+        "id": "chat-return",
+        "name": "Return Response",
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.1,
+        "position": [
+          3280,
+          112
+        ]
+      },
+      {
+        "parameters": {
+          "respondWith": "text",
+          "responseBody": "={{ JSON.stringify({ success: false, message: $('Validate Auth').first().json.error || 'Unauthorized' }) }}",
+          "options": {
+            "responseHeaders": {
+              "entries": [
+                {
+                  "name": "Content-Type",
+                  "value": "application/json"
+                }
+              ]
+            }
+          }
+        },
+        "id": "chat-auth-err",
+        "name": "Return Auth Error",
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.1,
+        "position": [
+          1136,
+          400
+        ]
+      },
+      {
+        "parameters": {
+          "respondWith": "text",
+          "responseBody": "={{ JSON.stringify({ success: false, message: $('Check Category Access').first().json.error || 'Category access denied' }) }}",
+          "options": {
+            "responseHeaders": {
+              "entries": [
+                {
+                  "name": "Content-Type",
+                  "value": "application/json"
+                }
+              ]
+            }
+          }
+        },
+        "id": "chat-cat-err",
+        "name": "Return Category Error",
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.1,
+        "position": [
+          1584,
+          304
+        ]
+      },
+      {
+        "id": "chat-llm-http",
+        "name": "Call OpenAI LLM",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2440,
+          100
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.openai.com/v1/chat/completions",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "Bearer OPENAI_API_KEY_HERE"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "json",
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "model",
+                "value": "gpt-4o-mini"
+              },
+              {
+                "name": "messages",
+                "value": "={{ [\n  { \"role\": \"system\", \"content\": $(\"Build System Prompt\").first().json.system_prompt },\n  { \"role\": \"user\", \"content\": $(\"Extract Request\").first().json.message }\n] }}"
+              },
+              {
+                "name": "max_tokens",
+                "value": 1000
+              },
+              {
+                "name": "temperature",
+                "value": 0.3
+              }
+            ]
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "chat-parse-llm",
+        "name": "Parse LLM Response",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2660,
+          100
+        ],
+        "parameters": {
+          "jsCode": "const llmRes = $input.first().json;\nconst content = llmRes.choices && llmRes.choices[0] ? llmRes.choices[0].message.content : '응답 생성 실패';\nreturn [{ json: { llm_response: content } }];"
+        }
+      }
+    ],
+    "connections": {
+      "Secure Chat Webhook": {
+        "main": [
+          [
+            {
+              "node": "Extract Request",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extract Request": {
+        "main": [
+          [
+            {
+              "node": "Validate Auth",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Validate Auth": {
+        "main": [
+          [
+            {
+              "node": "Is Authorized?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Is Authorized?": {
+        "main": [
+          [
+            {
+              "node": "Check Category Access",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Return Auth Error",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Check Category Access": {
+        "main": [
+          [
+            {
+              "node": "Category OK?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Category OK?": {
+        "main": [
+          [
+            {
+              "node": "Get Query Embedding",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Return Category Error",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Get Query Embedding": {
+        "main": [
+          [
+            {
+              "node": "Search Source Docs",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Search Source Docs": {
+        "main": [
+          [
+            {
+              "node": "Extract Sources",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extract Sources": {
+        "main": [
+          [
+            {
+              "node": "Build System Prompt",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build System Prompt": {
+        "main": [
+          [
+            {
+              "node": "Call OpenAI LLM",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Write Audit Log": {
+        "main": [
+          [
+            {
+              "node": "Deduct Token",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Deduct Token": {
+        "main": [
+          [
+            {
+              "node": "Return Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Call OpenAI LLM": {
+        "main": [
+          [
+            {
+              "node": "Parse LLM Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Parse LLM Response": {
+        "main": [
+          [
+            {
+              "node": "Write Audit Log",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "nohjinkwang  ",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-03-01T01:19:29.060Z",
+        "id": 136,
+        "workflowId": "Oo9ThEBXSg3QUv4L",
+        "versionId": "e40f9f12-d286-43e5-9ca3-207a862a18aa",
+        "event": "activated",
+        "userId": "e1385cb4-ffed-49bb-b7eb-befd0ffea08e"
+      }
+    ]
+  }
+}

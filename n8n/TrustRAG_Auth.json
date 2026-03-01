@@ -1,1 +1,493 @@
-{"updatedAt":"2026-02-28T09:17:08.364Z","createdAt":"2026-02-28T09:17:08.364Z","id":"rDRKlBnQpPNyAcHH","name":"TrustRAG_Auth","description":null,"active":false,"isArchived":false,"nodes":[{"id":"auth-webhook","name":"Webhook","type":"n8n-nodes-base.webhook","typeVersion":2,"position":[240,300],"parameters":{"httpMethod":"POST","path":"trustrag/validate-key","responseMode":"responseNode","options":{"allowedOrigins":"*"}}},{"id":"auth-extract","name":"Extract Input","type":"n8n-nodes-base.code","typeVersion":2,"position":[460,300],"parameters":{"jsCode":"const body = $input.first().json.body || $input.first().json;\nconst apiKey = (body.api_key || '').trim();\nconst sessionId = body.session_id || 'default';\nconst category = body.category || '';\n\nif (!apiKey) {\n  return [{ json: { _auth_error: 'api_key is required' } }];\n}\n\nreturn [{ json: { api_key: apiKey, session_id: sessionId, category: category } }];"}},{"id":"auth-get-user","name":"Get User Permissions","type":"n8n-nodes-base.httpRequest","typeVersion":4.2,"position":[680,300],"parameters":{"method":"POST","url":"TRUSTRAG_SUPABASE_URL_HERE/rest/v1/rpc/get_user_permissions","sendHeaders":true,"headerParameters":{"parameters":[{"name":"apikey","value":"TRUSTRAG_SERVICE_KEY_HERE"},{"name":"Authorization","value":"Bearer TRUSTRAG_SERVICE_KEY_HERE"},{"name":"Content-Type","value":"application/json"}]},"sendBody":true,"contentType":"json","bodyParameters":{"parameters":[{"name":"p_api_key","value":"={{ $json.api_key }}"}]},"options":{}}},{"id":"auth-check","name":"Is Authorized?","type":"n8n-nodes-base.if","typeVersion":2,"position":[900,300],"parameters":{"conditions":{"options":{"caseSensitive":true},"conditions":[{"id":"c1","leftValue":"={{ $json.error }}","rightValue":"","operator":{"type":"string","operation":"empty","singleValue":true}}],"combinator":"and"}}},{"id":"auth-ok","name":"Return Auth OK","type":"n8n-nodes-base.respondToWebhook","typeVersion":1.1,"position":[1120,180],"parameters":{"respondWith":"text","responseBody":"={{ JSON.stringify({ success: true, user_id: $('Get User Permissions').first().json.user_id, company_id: $('Get User Permissions').first().json.company_id, name: $('Get User Permissions').first().json.name, role: $('Get User Permissions').first().json.role, tokens_remaining: $('Get User Permissions').first().json.tokens_remaining, categories: $('Get User Permissions').first().json.categories }) }}","options":{"responseHeaders":{"entries":[{"name":"Content-Type","value":"application/json"},{"name":"Access-Control-Allow-Origin","value":"*"}]}}}},{"id":"auth-err","name":"Return Auth Error","type":"n8n-nodes-base.respondToWebhook","typeVersion":1.1,"position":[1120,420],"parameters":{"respondWith":"text","responseCode":401,"responseBody":"={{ JSON.stringify({ success: false, message: $('Get User Permissions').first().json.error || 'Unauthorized' }) }}","options":{"responseHeaders":{"entries":[{"name":"Content-Type","value":"application/json"},{"name":"Access-Control-Allow-Origin","value":"*"}]}}}}],"connections":{"Webhook":{"main":[[{"node":"Extract Input","type":"main","index":0}]]},"Extract Input":{"main":[[{"node":"Get User Permissions","type":"main","index":0}]]},"Get User Permissions":{"main":[[{"node":"Is Authorized?","type":"main","index":0}]]},"Is Authorized?":{"main":[[{"node":"Return Auth OK","type":"main","index":0}],[{"node":"Return Auth Error","type":"main","index":0}]]}},"settings":{"executionOrder":"v1","callerPolicy":"workflowsFromSameOwner","availableInMCP":false},"staticData":null,"meta":null,"pinData":null,"versionId":"def446eb-3f0c-4293-baf9-dc794e33e614","activeVersionId":null,"versionCounter":1,"triggerCount":0,"shared":[{"updatedAt":"2026-02-28T09:17:08.366Z","createdAt":"2026-02-28T09:17:08.366Z","role":"workflow:owner","workflowId":"rDRKlBnQpPNyAcHH","projectId":"gYkSZvHl0guLtWX6","project":{"updatedAt":"2026-01-14T06:41:15.180Z","createdAt":"2026-01-14T06:41:10.535Z","id":"gYkSZvHl0guLtWX6","name":"nohjinkwang   <thomasnoh@kakao.com>","type":"personal","icon":null,"description":null,"creatorId":"e1385cb4-ffed-49bb-b7eb-befd0ffea08e"}}],"tags":[],"activeVersion":null}
+{
+  "updatedAt": "2026-02-28T10:38:39.783Z",
+  "createdAt": "2026-02-28T09:17:08.364Z",
+  "id": "rDRKlBnQpPNyAcHH",
+  "name": "TrustRAG_Auth",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "auth-webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "trustrag/validate-key",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "webhookId": "tr-validate-key"
+    },
+    {
+      "id": "auth-extract",
+      "name": "Extract Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || $input.first().json;\nconst apiKey = (body.api_key || '').trim();\nconst sessionId = body.session_id || 'default';\nconst category = body.category || '';\n\nif (!apiKey) {\n  return [{ json: { _auth_error: 'api_key is required' } }];\n}\n\nreturn [{ json: { api_key: apiKey, session_id: sessionId, category: category } }];"
+      }
+    },
+    {
+      "id": "auth-get-user",
+      "name": "Get User Permissions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://ryzkcdvywxblsbyujtfv.supabase.co/rest/v1/rpc/get_user_permissions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "p_api_key",
+              "value": "={{ $json.api_key }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "auth-check",
+      "name": "Is Authorized?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "auth-ok",
+      "name": "Return Auth OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1120,
+        180
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ JSON.stringify({ success: true, user_id: $('Get User Permissions').first().json.user_id, company_id: $('Get User Permissions').first().json.company_id, name: $('Get User Permissions').first().json.name, role: $('Get User Permissions').first().json.role, tokens_remaining: $('Get User Permissions').first().json.tokens_remaining, categories: $('Get User Permissions').first().json.categories }) }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "auth-err",
+      "name": "Return Auth Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1120,
+        420
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseCode": 401,
+        "responseBody": "={{ JSON.stringify({ success: false, message: $('Get User Permissions').first().json.error || 'Unauthorized' }) }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Extract Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Input": {
+      "main": [
+        [
+          {
+            "node": "Get User Permissions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get User Permissions": {
+      "main": [
+        [
+          {
+            "node": "Is Authorized?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Authorized?": {
+      "main": [
+        [
+          {
+            "node": "Return Auth OK",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Auth Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": null,
+  "pinData": null,
+  "versionId": "2eb25b50-74b4-4567-bf7a-13ade6b49fd6",
+  "activeVersionId": "2eb25b50-74b4-4567-bf7a-13ade6b49fd6",
+  "versionCounter": 11,
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-02-28T09:17:08.366Z",
+      "createdAt": "2026-02-28T09:17:08.366Z",
+      "role": "workflow:owner",
+      "workflowId": "rDRKlBnQpPNyAcHH",
+      "projectId": "gYkSZvHl0guLtWX6",
+      "project": {
+        "updatedAt": "2026-01-14T06:41:15.180Z",
+        "createdAt": "2026-01-14T06:41:10.535Z",
+        "id": "gYkSZvHl0guLtWX6",
+        "name": "nohjinkwang   <thomasnoh@kakao.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "e1385cb4-ffed-49bb-b7eb-befd0ffea08e"
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": {
+    "updatedAt": "2026-02-28T10:38:39.784Z",
+    "createdAt": "2026-02-28T10:38:39.784Z",
+    "versionId": "2eb25b50-74b4-4567-bf7a-13ade6b49fd6",
+    "workflowId": "rDRKlBnQpPNyAcHH",
+    "nodes": [
+      {
+        "id": "auth-webhook",
+        "name": "Webhook",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [
+          240,
+          300
+        ],
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "trustrag/validate-key",
+          "responseMode": "responseNode",
+          "options": {
+            "allowedOrigins": "*"
+          }
+        },
+        "webhookId": "tr-validate-key"
+      },
+      {
+        "id": "auth-extract",
+        "name": "Extract Input",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          460,
+          300
+        ],
+        "parameters": {
+          "jsCode": "const body = $input.first().json.body || $input.first().json;\nconst apiKey = (body.api_key || '').trim();\nconst sessionId = body.session_id || 'default';\nconst category = body.category || '';\n\nif (!apiKey) {\n  return [{ json: { _auth_error: 'api_key is required' } }];\n}\n\nreturn [{ json: { api_key: apiKey, session_id: sessionId, category: category } }];"
+        }
+      },
+      {
+        "id": "auth-get-user",
+        "name": "Get User Permissions",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          680,
+          300
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://ryzkcdvywxblsbyujtfv.supabase.co/rest/v1/rpc/get_user_permissions",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "apikey",
+                "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+              },
+              {
+                "name": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "json",
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "p_api_key",
+                "value": "={{ $json.api_key }}"
+              }
+            ]
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "auth-check",
+        "name": "Is Authorized?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          900,
+          300
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true
+            },
+            "conditions": [
+              {
+                "id": "c1",
+                "leftValue": "={{ $json.error }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "string",
+                  "operation": "empty",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          }
+        }
+      },
+      {
+        "id": "auth-ok",
+        "name": "Return Auth OK",
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.1,
+        "position": [
+          1120,
+          180
+        ],
+        "parameters": {
+          "respondWith": "text",
+          "responseBody": "={{ JSON.stringify({ success: true, user_id: $('Get User Permissions').first().json.user_id, company_id: $('Get User Permissions').first().json.company_id, name: $('Get User Permissions').first().json.name, role: $('Get User Permissions').first().json.role, tokens_remaining: $('Get User Permissions').first().json.tokens_remaining, categories: $('Get User Permissions').first().json.categories }) }}",
+          "options": {
+            "responseHeaders": {
+              "entries": [
+                {
+                  "name": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "name": "Access-Control-Allow-Origin",
+                  "value": "*"
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "auth-err",
+        "name": "Return Auth Error",
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.1,
+        "position": [
+          1120,
+          420
+        ],
+        "parameters": {
+          "respondWith": "text",
+          "responseCode": 401,
+          "responseBody": "={{ JSON.stringify({ success: false, message: $('Get User Permissions').first().json.error || 'Unauthorized' }) }}",
+          "options": {
+            "responseHeaders": {
+              "entries": [
+                {
+                  "name": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "name": "Access-Control-Allow-Origin",
+                  "value": "*"
+                }
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "connections": {
+      "Webhook": {
+        "main": [
+          [
+            {
+              "node": "Extract Input",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extract Input": {
+        "main": [
+          [
+            {
+              "node": "Get User Permissions",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Get User Permissions": {
+        "main": [
+          [
+            {
+              "node": "Is Authorized?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Is Authorized?": {
+        "main": [
+          [
+            {
+              "node": "Return Auth OK",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Return Auth Error",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "nohjinkwang  ",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-02-28T10:38:40.425Z",
+        "id": 114,
+        "workflowId": "rDRKlBnQpPNyAcHH",
+        "versionId": "2eb25b50-74b4-4567-bf7a-13ade6b49fd6",
+        "event": "activated",
+        "userId": "e1385cb4-ffed-49bb-b7eb-befd0ffea08e"
+      }
+    ]
+  }
+}
