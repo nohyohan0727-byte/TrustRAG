@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-02-28T10:44:17.861Z",
+  "updatedAt": "2026-03-01T01:47:25.386Z",
   "createdAt": "2026-02-28T09:30:02.627Z",
   "id": "9c5kGAC7xHGXgvtX",
   "name": "TrustRAG_Admin",
@@ -239,6 +239,24 @@
                   {
                     "leftValue": "={{ $('Extract Request').first().json.action }}",
                     "rightValue": "get_audit_logs",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Extract Request').first().json.action }}",
+                    "rightValue": "add_tokens",
                     "operator": {
                       "type": "string",
                       "operation": "equals"
@@ -762,6 +780,127 @@
         1568,
         368
       ]
+    },
+    {
+      "parameters": {
+        "url": "=https://ryzkcdvywxblsbyujtfv.supabase.co/rest/v1/users?id=eq.{{ $('Extract Request').first().json.data.user_id }}&select=id,email,tokens_remaining,tokens_total",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "adm-get-user-tokens",
+      "name": "Get User Tokens",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1808,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 새 토큰 값 계산 (HTTP 요청 없음)\nconst user = $input.first().json;\nconst amount = parseInt($('Extract Request').first().json.data.amount) || 0;\n\nif (!user || !user.id) {\n  return [{ json: { error: 'User not found' } }];\n}\n\nreturn [{ json: {\n  user_id: user.id,\n  email: user.email,\n  tokens_remaining: (user.tokens_remaining || 0) + amount,\n  tokens_total: (user.tokens_total || 0) + amount,\n  added: amount\n} }];"
+      },
+      "id": "adm-compute-tokens",
+      "name": "Compute New Tokens",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2032,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://ryzkcdvywxblsbyujtfv.supabase.co/rest/v1/users?id=eq.{{ $json.user_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "tokens_remaining",
+              "value": "={{ $json.tokens_remaining }}"
+            },
+            {
+              "name": "tokens_total",
+              "value": "={{ $json.tokens_total }}"
+            },
+            {
+              "name": "updated_at",
+              "value": "={{ new Date().toISOString() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "adm-update-tokens",
+      "name": "Update Tokens",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2256,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ (() => {\n  const d = $('Compute New Tokens').first().json;\n  if (d.error) return JSON.stringify({ success: false, message: d.error });\n  const updated = $json[0] || $json;\n  return JSON.stringify({\n    success: true,\n    action: 'add_tokens',\n    tokens_remaining: updated.tokens_remaining || d.tokens_remaining,\n    tokens_total: updated.tokens_total || d.tokens_total,\n    added: d.added,\n    user_email: d.email,\n    message: '토큰이 추가되었습니다'\n  });\n})() }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "adm-return-add-tokens",
+      "name": "Return Add Tokens",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2480,
+        800
+      ]
     }
   ],
   "connections": {
@@ -884,6 +1023,13 @@
         ],
         [
           {
+            "node": "Get User Tokens",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
             "node": "Return Action Error",
             "type": "main",
             "index": 0
@@ -956,6 +1102,39 @@
           }
         ]
       ]
+    },
+    "Get User Tokens": {
+      "main": [
+        [
+          {
+            "node": "Compute New Tokens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute New Tokens": {
+      "main": [
+        [
+          {
+            "node": "Update Tokens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Tokens": {
+      "main": [
+        [
+          {
+            "node": "Return Add Tokens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -966,9 +1145,9 @@
   "staticData": null,
   "meta": null,
   "pinData": {},
-  "versionId": "d21a4200-c211-46d2-b6c7-8f300ebef165",
-  "activeVersionId": "d21a4200-c211-46d2-b6c7-8f300ebef165",
-  "versionCounter": 16,
+  "versionId": "1b6b71b5-eff1-48b4-b7b3-237cf0c731e6",
+  "activeVersionId": "1b6b71b5-eff1-48b4-b7b3-237cf0c731e6",
+  "versionCounter": 24,
   "triggerCount": 1,
   "shared": [
     {
@@ -998,9 +1177,9 @@
     }
   ],
   "activeVersion": {
-    "updatedAt": "2026-02-28T10:44:17.861Z",
-    "createdAt": "2026-02-28T10:44:17.861Z",
-    "versionId": "d21a4200-c211-46d2-b6c7-8f300ebef165",
+    "updatedAt": "2026-03-01T01:47:25.388Z",
+    "createdAt": "2026-03-01T01:47:25.388Z",
+    "versionId": "1b6b71b5-eff1-48b4-b7b3-237cf0c731e6",
     "workflowId": "9c5kGAC7xHGXgvtX",
     "nodes": [
       {
@@ -1235,6 +1414,24 @@
                     {
                       "leftValue": "={{ $('Extract Request').first().json.action }}",
                       "rightValue": "get_audit_logs",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      }
+                    }
+                  ],
+                  "combinator": "and"
+                }
+              },
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": true
+                  },
+                  "conditions": [
+                    {
+                      "leftValue": "={{ $('Extract Request').first().json.action }}",
+                      "rightValue": "add_tokens",
                       "operator": {
                         "type": "string",
                         "operation": "equals"
@@ -1758,6 +1955,127 @@
           1568,
           368
         ]
+      },
+      {
+        "parameters": {
+          "url": "=https://ryzkcdvywxblsbyujtfv.supabase.co/rest/v1/users?id=eq.{{ $('Extract Request').first().json.data.user_id }}&select=id,email,tokens_remaining,tokens_total",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "apikey",
+                "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+              },
+              {
+                "name": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "adm-get-user-tokens",
+        "name": "Get User Tokens",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1808,
+          800
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "// 새 토큰 값 계산 (HTTP 요청 없음)\nconst user = $input.first().json;\nconst amount = parseInt($('Extract Request').first().json.data.amount) || 0;\n\nif (!user || !user.id) {\n  return [{ json: { error: 'User not found' } }];\n}\n\nreturn [{ json: {\n  user_id: user.id,\n  email: user.email,\n  tokens_remaining: (user.tokens_remaining || 0) + amount,\n  tokens_total: (user.tokens_total || 0) + amount,\n  added: amount\n} }];"
+        },
+        "id": "adm-compute-tokens",
+        "name": "Compute New Tokens",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2032,
+          800
+        ]
+      },
+      {
+        "parameters": {
+          "method": "PATCH",
+          "url": "=https://ryzkcdvywxblsbyujtfv.supabase.co/rest/v1/users?id=eq.{{ $json.user_id }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "apikey",
+                "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+              },
+              {
+                "name": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5emtjZHZ5d3hibHNieXVqdGZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI2NDk4OCwiZXhwIjoyMDg3ODQwOTg4fQ.gcq-e2pLFWFxtx_Y1tLcPaOcACGthpWPRs7o6w2nz7s"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "Prefer",
+                "value": "return=representation"
+              }
+            ]
+          },
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "tokens_remaining",
+                "value": "={{ $json.tokens_remaining }}"
+              },
+              {
+                "name": "tokens_total",
+                "value": "={{ $json.tokens_total }}"
+              },
+              {
+                "name": "updated_at",
+                "value": "={{ new Date().toISOString() }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "adm-update-tokens",
+        "name": "Update Tokens",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2256,
+          800
+        ]
+      },
+      {
+        "parameters": {
+          "respondWith": "text",
+          "responseBody": "={{ (() => {\n  const d = $('Compute New Tokens').first().json;\n  if (d.error) return JSON.stringify({ success: false, message: d.error });\n  const updated = $json[0] || $json;\n  return JSON.stringify({\n    success: true,\n    action: 'add_tokens',\n    tokens_remaining: updated.tokens_remaining || d.tokens_remaining,\n    tokens_total: updated.tokens_total || d.tokens_total,\n    added: d.added,\n    user_email: d.email,\n    message: '토큰이 추가되었습니다'\n  });\n})() }}",
+          "options": {
+            "responseHeaders": {
+              "entries": [
+                {
+                  "name": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "name": "Access-Control-Allow-Origin",
+                  "value": "*"
+                }
+              ]
+            }
+          }
+        },
+        "id": "adm-return-add-tokens",
+        "name": "Return Add Tokens",
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.1,
+        "position": [
+          2480,
+          800
+        ]
       }
     ],
     "connections": {
@@ -1880,6 +2198,13 @@
           ],
           [
             {
+              "node": "Get User Tokens",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
               "node": "Return Action Error",
               "type": "main",
               "index": 0
@@ -1952,6 +2277,39 @@
             }
           ]
         ]
+      },
+      "Get User Tokens": {
+        "main": [
+          [
+            {
+              "node": "Compute New Tokens",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Compute New Tokens": {
+        "main": [
+          [
+            {
+              "node": "Update Tokens",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Update Tokens": {
+        "main": [
+          [
+            {
+              "node": "Return Add Tokens",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
       }
     },
     "authors": "nohjinkwang  ",
@@ -1960,10 +2318,10 @@
     "autosaved": false,
     "workflowPublishHistory": [
       {
-        "createdAt": "2026-02-28T10:44:18.358Z",
-        "id": 122,
+        "createdAt": "2026-03-01T01:47:25.908Z",
+        "id": 140,
         "workflowId": "9c5kGAC7xHGXgvtX",
-        "versionId": "d21a4200-c211-46d2-b6c7-8f300ebef165",
+        "versionId": "1b6b71b5-eff1-48b4-b7b3-237cf0c731e6",
         "event": "activated",
         "userId": "e1385cb4-ffed-49bb-b7eb-befd0ffea08e"
       }
