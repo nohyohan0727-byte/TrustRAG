@@ -98,6 +98,17 @@ TrustRAG/
 | TrustRAG_Upload | `ZrdgEqchaCSoycyP` | `POST /trustrag/upload` | ✅ 활성화됨 |
 | TrustRAG_Admin | `9c5kGAC7xHGXgvtX` | `POST /trustrag/admin` | ✅ 활성화됨 |
 
+### Admin 워크플로우 지원 액션 (`POST /trustrag/admin`)
+
+| 액션 | 설명 | 필요 역할 |
+|------|------|----------|
+| `create_user` | 신규 유저 생성 (api_key 자동 발급) | company_admin+ |
+| `create_category` | 카테고리 생성 + 동적 벡터 테이블 생성 | company_admin+ |
+| `grant_permission` | 카테고리 접근 권한 부여 | company_admin+ |
+| `list_users` | 회사 유저 목록 조회 | company_admin+ |
+| `get_audit_logs` | 감사 로그 조회 | company_admin+ |
+| `add_tokens` | 유저 토큰 추가 | company_admin+ |
+
 ---
 
 ## 핵심 설계 원칙
@@ -121,9 +132,34 @@ TrustRAG/
 | Phase 2 | Supabase 프로젝트 생성 + DB 스키마 실행 | ✅ 완료 |
 | Phase 3 | n8n 워크플로우 Supabase 연결 + 활성화 | ✅ 완료 |
 | Phase 4 | 엔드투엔드 테스트 (Auth → Chat → Upload → Admin) | ✅ 완료 |
-| Phase 4.5 | 테스트 페이지 (office-ai.app/trustrag/) | ✅ 완료 |
+| Phase 4.5 | 테스트 페이지 UI 전면 개선 + 회원관리 + 버그수정 | ✅ 완료 |
 | Phase 5 | 프론트엔드 (office-ai.app/trust/) | 🔲 대기 |
 | Phase 6 | 감사 로그 대시보드 + 보안 강화 | 🔲 대기 |
+
+### 테스트 페이지 (Phase 4.5 완료)
+
+| 페이지 | URL | 설명 |
+|--------|-----|------|
+| 채팅 | https://office-ai.app/trustrag/chat.html | RAG 검색 + AI 답변 |
+| 업로드 | https://office-ai.app/trustrag/upload.html | 문서 업로드 + 임베딩 |
+| 관리자 | https://office-ai.app/trustrag/admin.html | 회원/카테고리/권한/토큰 관리 |
+
+**관리자 키**: `.env`의 `TRUSTRAG_SUPER_ADMIN_API_KEY` 사용
+
+---
+
+## n8n 개발 교훈 (TrustRAG 작업 중 발견)
+
+| 교훈 | 상황 | 해결책 |
+|------|------|--------|
+| **IF 노드 boolean 비교 버그** | `=== true` 비교가 n8n에서 신뢰 불가 | `error` 필드 empty 체크 패턴으로 대체 |
+| **LangChain 크레덴셜 접근 불가** | 타 워크플로우의 OpenAI 크레덴셜 재사용 실패 | HTTP Request 노드로 OpenAI API 직접 호출 |
+| **`$helpers.httpRequest` 불가** | n8n Cloud Code 노드에서 HTTP 호출 불가 | 별도 HTTP Request 노드를 연결해 처리 |
+| **`$input.first()` vs `$input.all()`** | Supabase 배열 응답을 n8n이 개별 item으로 분리 | 여러 결과 수집 시 반드시 `$input.all()` 사용 |
+| **URL 표현식 혼용 오류** | `=https://url/{{ expr }}` 방식 오류 | `={{ 'https://url/' + expr }}` 로 통일 |
+| **neverError 필수** | Supabase 4xx 시 워크플로우 중단 | HTTP 노드에 `neverError: true` 설정 |
+| **api_key NOT NULL** | users INSERT 시 api_key 누락 → DB 오류 | Code 노드에서 `'trust_user_' + uuid()` 자동 생성 |
+| **callAdmin 빈 응답** | n8n 워크플로우 오류 시 200 빈 body 반환 | `res.text()` → empty 체크 → `JSON.parse()` 순서 |
 
 ---
 

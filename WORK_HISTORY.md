@@ -10,15 +10,77 @@
 
 | 항목 | 현재 상태 |
 |------|-----------|
-| **진행 Phase** | Phase 0~4 완료 (엔드투엔드 RAG 테스트 성공) |
+| **진행 Phase** | Phase 0~4.5 완료 (UI 전면 개선 + 회원관리 완성) |
 | **Supabase** | `ryzkcdvywxblsbyujtfv` (활성) |
-| **n8n 워크플로우** | 4개 생성 + 활성화 + 전체 동작 확인 |
+| **n8n 워크플로우** | 4개 전체 동작 / Admin 액션 6개 지원 |
 | **프론트엔드** | 테스트 페이지: office-ai.app/trustrag/{chat,upload,admin}.html |
 | **마지막 작업일** | 2026-03-01 |
 
 ---
 
 ## 작업 이력
+
+---
+
+### [2026-03-01] Phase 4.5 — UI 전면 개선 + 회원관리 + 버그수정
+
+| 항목 | 내용 |
+|------|------|
+| **작업자** | nohyohan0727-byte + Claude (Sonnet 4.6) |
+| **상태** | ✅ 완료 |
+| **커밋** | office-ai `63c6288`, `187eb10` / TrustRAG `5594d64` |
+
+#### UI 개선 (office-ai.app/trustrag/)
+
+**chat.html**
+- 레이아웃: 최대 680px 중앙 정렬 (기존 전체 너비 → 좁은 채팅 UI)
+- 카테고리: raw table_name 직접 노출 → 드롭다운 선택 (categoryMap으로 내부 변환)
+- 세션 ID: 사용자에게 숨기고 자동 생성 (`'session-' + Date.now().toString(36)`)
+- 보안: API 키 입력 → 인증 성공 후 카테고리 목록 동적 표시
+
+**upload.html**
+- 카테고리: table_name 직접 입력 → 드롭다운 (can_upload 권한 필터링)
+- 파일 상태: 파일별 성공(초록 테두리) / 실패(빨간 테두리) 표시 + 제거 버튼
+- 결과 표시: JSON dump → 요약 박스 (성공/실패 건수 + 아이콘)
+
+**admin.html — 전면 재설계 (역할별 회원관리)**
+- 탭 구조: 회원관리 / 카테고리관리 / 권한관리 / 감사로그
+- 역할 계층: super_admin(운영자) > company_admin(회사관리자) > group_admin(그룹관리자) > user(사용자)
+- 탭 노출 기준:
+  - 회원관리: company_admin 이상
+  - 카테고리관리: company_admin 이상
+  - 권한관리: group_admin 이상
+  - 감사로그: company_admin 이상
+- 회원 목록: 테이블 형식, 역할 배지 색상 구분
+- 회원 등록: 이메일/이름/역할/초기토큰 입력 → 등록 성공 시 API 키 화면 표시
+- 토큰 관리: 드롭다운으로 회원 선택 → 수량 입력 → 추가
+- 권한 관리: UUID 직접 입력 제거 → 회원/카테고리 드롭다운 선택 방식
+
+#### n8n Admin 워크플로우 신기능
+
+**`add_tokens` 액션 추가**
+- Route Action Switch에 케이스 추가 (index 5)
+- 노드 체인: Get User Tokens (HTTP GET) → Compute New Tokens (Code) → Update Tokens (HTTP PATCH) → Return Add Tokens
+- 테스트: +500 토큰 정상 처리 (99,996 → 100,496)
+
+**`create_user` 버그 수정**
+- 원인: `api_key` 컬럼 NOT NULL인데 INSERT 시 누락 → Supabase 오류 → 빈 응답
+- 해결: `Prepare Create User` Code 노드 추가 → `'trust_user_' + uuid()` 자동 생성
+- 추가: `is_active: true` 기본값 설정
+- 추가: `neverError: true` 설정 → Supabase 오류도 응답으로 반환
+- 추가: Return 노드에 중복 이메일 등 에러 메시지 처리
+
+**callAdmin 프론트엔드 방어 코드**
+- 기존: `res.json()` 직접 호출 → 빈 응답 시 "Unexpected end of JSON input"
+- 수정: `res.text()` → empty 체크 → `JSON.parse()` 순서로 안전 처리
+
+#### 발견된 중요 패턴
+
+| 패턴 | 내용 |
+|------|------|
+| `$helpers.httpRequest` 불가 | n8n Cloud Code 노드에서 HTTP 호출 지원 안 됨 → 별도 HTTP Request 노드 사용 |
+| n8n 빈 응답 | 워크플로우 오류 시 Status 200, Body "" 반환 → 프론트에서 text()로 읽어야 함 |
+| neverError 필수 | Supabase 4xx 오류 시 neverError 없으면 워크플로우 중단 |
 
 ---
 
